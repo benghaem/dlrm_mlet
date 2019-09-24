@@ -464,6 +464,9 @@ if __name__ == "__main__":
     parser.add_argument("--enable-rp", action="store_true", default=False)
     parser.add_argument("--rp-file", type=str, default="")
 
+    # half_precision
+    parser.add_argument("--fp16", action="store_true", default=False)
+
     # debugging and profiling
     parser.add_argument("--print-freq", type=int, default=1)
     parser.add_argument("--test-freq", type=int, default=-1)
@@ -483,6 +486,8 @@ if __name__ == "__main__":
     torch.manual_seed(args.numpy_rand_seed)
 
     use_gpu = args.use_gpu and torch.cuda.is_available()
+    use_fp16 = args.fp16 and use_gpu
+
     if use_gpu:
         torch.cuda.manual_seed_all(args.numpy_rand_seed)
         torch.backends.cudnn.deterministic = True
@@ -501,6 +506,9 @@ if __name__ == "__main__":
                                    device=device)
         else:
             rp_mats = torch.tensor(pickle.load(open(args.rp_file,"rb")))
+
+    if use_fp16:
+        rp_mats = rp_mats.half()
 
     ### prepare training data ###
     ln_bot = np.fromstring(args.arch_mlp_bot, dtype=int, sep="-")
@@ -739,6 +747,9 @@ if __name__ == "__main__":
             dlrm.ndevices = min(ngpus, args.mini_batch_size, num_fea - 1)
         dlrm = dlrm.to(device)  # .cuda()
 
+    if use_fp16:
+        dlrm = dlrm.half()
+
     # specify the loss function
     if args.loss_function == "mse":
         loss_fn = torch.nn.MSELoss(reduction="mean")
@@ -757,19 +768,29 @@ if __name__ == "__main__":
             torch.cuda.synchronize()
         return time.time()
 
-    def dlrm_wrap(X, lS_o, lS_i, use_gpu, device):
+    def dlrm_wrap(X, lS_o, lS_i, use_gpu, use_fp16, device):
         if use_gpu:  # .cuda()
-            return dlrm(
-                X.to(device),
-                [S_o.to(device) for S_o in lS_o],
-                [S_i.to(device) for S_i in lS_i],
-            )
+            if use_fp16:
+                return dlrm(
+                    X.to(device).half(),
+                    [S_o.to(device) for S_o in lS_o],
+                    [S_i.to(device) for S_i in lS_i],
+                )
+            else:
+                return dlrm(
+                    X.to(device),
+                    [S_o.to(device) for S_o in lS_o],
+                    [S_i.to(device) for S_i in lS_i],
+                )
         else:
             return dlrm(X, lS_o, lS_i)
 
-    def loss_fn_wrap(Z, T, use_gpu, device):
+    def loss_fn_wrap(Z, T, use_gpu, use_fp16, device):
         if use_gpu:
-            return loss_fn(Z, T.to(device))
+            if use_fp16:
+                return loss_fn(Z.half(), T.to(device).half())
+            else:
+                return loss_fn(Z, T.to(device))
         else:
             return loss_fn(Z, T)
 
@@ -836,10 +857,10 @@ if __name__ == "__main__":
                 t1 = time_wrap(use_gpu)
 
                 # forward pass
-                Z = dlrm_wrap(X, lS_o, lS_i, use_gpu, device)
+                Z = dlrm_wrap(X, lS_o, lS_i, use_gpu, use_fp16, device)
 
                 # loss
-                E = loss_fn_wrap(Z, T, use_gpu, device)
+                E = loss_fn_wrap(Z, T, use_gpu, use_fp16, device)
                 '''
                 # debug prints
                 print("output and loss")
@@ -916,10 +937,11 @@ if __name__ == "__main__":
 
                         # forward pass
                         Z_test = dlrm_wrap(
-                            X_test, lS_o_test, lS_i_test, use_gpu, device
+                            X_test, lS_o_test, lS_i_test, use_gpu, use_fp16, device
                         )
                         # loss
-                        E_test = loss_fn_wrap(Z_test, T_test, use_gpu, device)
+                        E_test = loss_fn_wrap(Z_test, T_test, use_gpu,
+                                use_fp16, device)
 
                         # compute loss and accuracy
                         L_test = E_test.detach().cpu().numpy()  # numpy array
