@@ -246,6 +246,15 @@ updated parameters (weights and bias):
 [0.07908]
 ```
 
+Using Random Projections
+-------------------------------------------------
+
+```
+--enable-rp
+--rp-file <filename>
+```
+
+
 Testing
 -------
 Testing scripts to confirm functional correctness of the code
@@ -281,9 +290,8 @@ Benchmarking
      ```
      ./bench/dlrm_s_criteo_kaggle.sh
      ```
-<img src="./kaggle_dac_loss_accuracy_plots.png" width="900" height="320">
-
 *NOTE: Benchmarking scripts accept extra arguments which will passed along, such as --num-batches=100 to limit the number of data samples*
+
 
 Model checkpoint saving/loading
 -------------------------------------------------
