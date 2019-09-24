@@ -496,9 +496,11 @@ if __name__ == "__main__":
     ### prepare RP matrcies ###
     rp_mats = None
     if args.enable_rp:
-        rp_mats = torch.tensor(pickle.load(open(args.rp_file,"rb")))
         if use_gpu:
-            rp_mats.pin_memory()
+            rp_mats = torch.tensor(pickle.load(open(args.rp_file,"rb")),
+                                   device=device)
+        else:
+            rp_mats = torch.tensor(pickle.load(open(args.rp_file,"rb")))
 
     ### prepare training data ###
     ln_bot = np.fromstring(args.arch_mlp_bot, dtype=int, sep="-")
