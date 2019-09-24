@@ -65,6 +65,9 @@ import dlrm_data_pytorch as dp
 # numpy
 import numpy as np
 
+# pickle
+import pickle
+
 # onnx
 import onnx
 
@@ -161,6 +164,8 @@ class DLRM_Net(nn.Module):
         sync_dense_params=True,
         loss_threshold=0.0,
         ndevices=-1,
+        enable_rp = False,
+        rp_mats = None
     ):
         super(DLRM_Net, self).__init__()
 
@@ -185,6 +190,9 @@ class DLRM_Net(nn.Module):
             self.emb_l = self.create_emb(m_spa, ln_emb)
             self.bot_l = self.create_mlp(ln_bot, sigmoid_bot)
             self.top_l = self.create_mlp(ln_top, sigmoid_top)
+            self.enable_rp = enable_rp
+            self.rp_mats = rp_mats
+
 
     def apply_mlp(self, x, layers):
         # approach 1: use ModuleList
@@ -213,7 +221,13 @@ class DLRM_Net(nn.Module):
             E = emb_l[k]
             V = E(sparse_index_group_batch, sparse_offset_group_batch)
 
-            ly.append(V)
+            # if we are using random projection mode, apply it here
+            if self.enable_rp:
+                RP = self.rp_mats[k]
+                V_RP = torch.matmul(V,RP)
+                ly.append(V_RP)
+            else:
+                ly.append(V)
 
         # print(ly)
         return ly
@@ -445,6 +459,11 @@ if __name__ == "__main__":
     parser.add_argument("--save-onnx", action="store_true", default=False)
     # gpu
     parser.add_argument("--use-gpu", action="store_true", default=False)
+
+    # random projection
+    parser.add_argument("--enable-rp", action="store_true", default=False)
+    parser.add_argument("--rp-file", type=str, default="")
+
     # debugging and profiling
     parser.add_argument("--print-freq", type=int, default=1)
     parser.add_argument("--test-freq", type=int, default=-1)
@@ -473,6 +492,13 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
         print("Using CPU...")
+
+    ### prepare RP matrcies ###
+    rp_mats = None
+    if args.enable_rp:
+        rp_mats = torch.tensor(pickle.load(open(args.rp_file,"rb")))
+        if use_gpu:
+            rp_mats.pin_memory()
 
     ### prepare training data ###
     ln_bot = np.fromstring(args.arch_mlp_bot, dtype=int, sep="-")
@@ -608,13 +634,16 @@ if __name__ == "__main__":
             + " does not match first dim of bottom mlp "
             + str(ln_bot[0])
         )
-    if m_spa != m_den_out:
+
+    #TODO: Fix this check to match sizes
+    if m_spa != m_den_out and args.enable_rp == False:
         sys.exit(
             "ERROR: arch-sparse-feature-size "
             + str(m_spa)
             + " does not match last dim of bottom mlp "
             + str(m_den_out)
         )
+
     if num_int != ln_top[0]:
         sys.exit(
             "ERROR: # of feature interactions "
@@ -690,6 +719,8 @@ if __name__ == "__main__":
         sigmoid_top=ln_top.size - 2,
         sync_dense_params=args.sync_dense_params,
         loss_threshold=args.loss_threshold,
+        enable_rp=args.enable_rp,
+        rp_mats=rp_mats
     )
     # test prints
     if args.debug_mode:
