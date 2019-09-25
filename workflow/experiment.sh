@@ -15,8 +15,8 @@ echo "[INFO] Launch Pytorch"
 generic_args="--arch-mlp-top "512-256-1" --data-generation dataset
 --data-set kaggle --processed-data-file ../dlrm_support/data/kaggle_processed.npz
 --loss-function bce --round-targets True --learning-rate 0.2
---mini-batch-size 128 
---print-freq 1024 --print-time --test-freq 3000 
+--mini-batch-size 128 --num-workers 0
+--print-freq 128 --print-time --test-freq 3000 
 --nepochs 1 --use-gpu --fp16"
 
 rp_args="--enable-rp"

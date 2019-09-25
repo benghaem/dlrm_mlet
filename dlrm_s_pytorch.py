@@ -788,7 +788,10 @@ if __name__ == "__main__":
     def loss_fn_wrap(Z, T, use_gpu, use_fp16, device):
         if use_gpu:
             if use_fp16:
-                return loss_fn(Z.half(), T.to(device).half())
+                Td = T.to(device).half()
+                assert (Z >= 0.).all() and (Z <= 1.).all()
+                assert (T >= 0.).all() and (T <= 1.).all()
+                return loss_fn(Z, Td)
             else:
                 return loss_fn(Z, T.to(device))
         else:
