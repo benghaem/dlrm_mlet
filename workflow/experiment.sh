@@ -10,14 +10,17 @@ dlrm_exe="python3 dlrm_s_pytorch.py"
 
 use_rclone=true
 
+dlrm_support_dir=/home/usr1/bghaem/mu/proj/dlrm/support
+
 echo "[INFO] Launch Pytorch"
 
 generic_args="--arch-mlp-top "512-256-1" --data-generation dataset
---data-set kaggle --processed-data-file ../dlrm_support/data/kaggle_processed.npz
+--data-set kaggle
+--processed-data-file ${dlrm_support_dir}/data/kaggle_processed.npz
 --loss-function bce --round-targets True --learning-rate 0.2
 --mini-batch-size 128 --num-workers 0
 --print-freq 128 --print-time --test-freq 3000 
---nepochs 1 --use-gpu --fp16"
+--nepochs 1 --use-gpu --fp16 --num-batches 200"
 
 rp_args="--enable-rp"
 
@@ -73,13 +76,13 @@ run_rp() {
 #run_rp "13-512-256-64-8" 128 8 ../rp_matrices/rpm_128_8_i0.bin
 
 #RP 64->4
-run_rp "13-512-256-64-4" 64 4 ../rp_matrices/rpm_64_4_i0.bin
+run_rp "13-512-256-64-4" 64 4 ${dlrm_support_dir}/rp_matrices/rpm_64_4_i0.bin
 
 #RP 64->8
-run_rp "13-512-256-64-8" 64 8 ../rp_matrices/rpm_64_8_i0.bin
+#run_rp "13-512-256-64-8" 64 8 ../rp_matrices/rpm_64_8_i0.bin
 
 #RP 64->16
-run_rp "13-512-256-64-16" 64 16 ../rp_matrices/rpm_64_16_i0.bin
+#run_rp "13-512-256-64-16" 64 16 ../rp_matrices/rpm_64_16_i0.bin
 
 exit
 
