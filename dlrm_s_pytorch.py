@@ -69,7 +69,7 @@ import numpy as np
 import pickle
 
 #nvidia apex
-import amp
+from apex import amp
 
 # onnx
 import onnx
@@ -513,7 +513,7 @@ if __name__ == "__main__":
         else:
             rp_mats = torch.tensor(pickle.load(open(args.rp_file,"rb")))
 
-    if use_fp16:
+    if (use_fp16 or args.apex_mode != "O0") and args.enable_rp:
         rp_mats = rp_mats.half()
 
     ### prepare training data ###
