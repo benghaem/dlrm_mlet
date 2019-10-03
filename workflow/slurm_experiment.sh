@@ -1,10 +1,12 @@
+#!/bin/bash
+
 #SBATCH -J bg_rp                # Job name
 #SBATCH -o bg_rp.o%j            # Name of stdout output file
 #SBATCH -e bg_rp.e%j            # Name of stderr error file
-#SBATCH -p v100                 # Queue (partition) name
+#SBATCH -p p100                 # Queue (partition) name
 #SBATCH -N 1                    # Total # of nodes (must be 1 for serial)
 #SBATCH -n 1                    # Total # of mpi tasks (should be 1 for serial)
-#SBATCH -t 04:00:00             # Run time (hh:mm:ss)
+#SBATCH -t 10:00:00             # Run time (hh:mm:ss)
 #SBATCH -A Accelerating-DNN-Tra # Project/Allocation
 
 #SBATCH --mail-type=all
@@ -19,11 +21,21 @@
 
 #Copy over data to /tmp 
 
-cp -r $work/dlrm_support /tmp
+mkdir /tmp/dlrm_support
+rsync -avz $WORK/dlrm_support/data /tmp/dlrm_support
+rsync -avz $WORK/dlrm_support/rp_matrices /tmp/dlrm_support
 
 #Copy over scripts to /tmp
 
-cp -r $work/dlrm_rp /tmp
+rsync -avz $WORK/dlrm_rp /tmp
+
+# Source the envrionment
+
+module load python3
+source $WORK/dlrm_env/bin/activate
+
+# Setup logging
+mkdir -p /tmp/dlrm_logs
 
 #Run the experiment scripts
 
@@ -31,10 +43,11 @@ cp -r $work/dlrm_rp /tmp
 
 #Save the log files
 
-cp -r logs/* $work/dlrm_logs
+cp -r /tmp/dlrm_logs/* $WORK/dlrm_logs
 
 #Cleanup
 
 rm -rf /tmp/dlrm_rp
+rm -rf /tmp/dlrm_logs
 rm -rf /tmp/dlrm_support
 
