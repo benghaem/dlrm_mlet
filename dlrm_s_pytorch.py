@@ -61,6 +61,7 @@ import time
 
 # data generation
 import dlrm_data_pytorch as dp
+import dlrm_data_avazu_pytorch as dp_ava
 
 # numpy
 import numpy as np
@@ -441,7 +442,7 @@ if __name__ == "__main__":
         "--data-generation", type=str, default="random"
     )  # synthetic or dataset
     parser.add_argument("--data-trace-file", type=str, default="./input/dist_emb_j.log")
-    parser.add_argument("--data-set", type=str, default="kaggle")  # or terabyte
+    parser.add_argument("--data-set", type=str, default="kaggle")  # or avazu
     parser.add_argument("--raw-data-file", type=str, default="")
     parser.add_argument("--processed-data-file", type=str, default="")
     parser.add_argument("--data-randomize", type=str, default="total")  # or day or none
@@ -470,6 +471,9 @@ if __name__ == "__main__":
     # half_precision
     parser.add_argument("--fp16", action="store_true", default=False)
 
+    # avazu database
+    parser.add_argument("--avazu-db-path", type=str, default="")
+
     # apex mode
     parser.add_argument("--apex-mode", type=str, default="O0")
 
@@ -493,6 +497,8 @@ if __name__ == "__main__":
 
     use_gpu = args.use_gpu and torch.cuda.is_available()
     use_fp16 = args.fp16 and use_gpu
+
+    print("---INIT DLRM---")
 
     if use_gpu:
         torch.cuda.manual_seed_all(args.numpy_rand_seed)
@@ -539,13 +545,47 @@ if __name__ == "__main__":
                 lS_o = [torch.tensor(range(sz0)) for _ in range(sz1)]
                 return X_int, lS_o, lS_i, T
 
-        train_data = dp.CriteoDataset(
-            args.data_set,
-            args.data_randomize,
-            "train",
-            args.raw_data_file,
-            args.processed_data_file,
-        )
+        train_data = None
+        test_data = None
+
+        if (args.data_set == "kaggle" or args.data_set == "terabyte"):
+            train_data = dp.CriteoDataset(
+                args.data_set,
+                args.data_randomize,
+                "train",
+                args.raw_data_file,
+                args.processed_data_file,
+            )
+
+            test_data = dp.CriteoDataset(
+                args.data_set,
+                args.data_randomize,
+                "test",
+                args.raw_data_file,
+                args.processed_data_file,
+            )
+        if (args.data_set == "avazu"):
+            train_data = dp_ava.AvazuDataset(
+                args.avazu_db_path,
+                split = 'train',
+                dup_to_mem = False,
+                chunk_size=3000000
+            )
+            test_data = dp_ava.AvazuDataset(
+                args.avazu_db_path,
+                split = 'val',
+                dup_to_mem = False,
+                chunk_size=5000000
+            )
+
+        #report model params
+        ln_emb = train_data.counts
+        m_den = train_data.m_den
+        ln_bot[0] = m_den
+
+
+
+        #setup loaders
         train_loader = torch.utils.data.DataLoader(
             train_data,
             batch_size=args.mini_batch_size,
@@ -555,15 +595,7 @@ if __name__ == "__main__":
             pin_memory=False,
             drop_last=False,
         )
-        nbatches = args.num_batches if args.num_batches > 0 else len(train_loader)
 
-        test_data = dp.CriteoDataset(
-            args.data_set,
-            args.data_randomize,
-            "test",
-            args.raw_data_file,
-            args.processed_data_file,
-        )
         test_loader = torch.utils.data.DataLoader(
             test_data,
             batch_size=args.mini_batch_size,
@@ -573,11 +605,13 @@ if __name__ == "__main__":
             pin_memory=False,
             drop_last=False,
         )
-        nbatches_test = len(test_loader)
 
-        ln_emb = train_data.counts
-        m_den = train_data.m_den
-        ln_bot[0] = m_den
+
+
+
+        #setup batch sizes
+        nbatches = args.num_batches if args.num_batches > 0 else len(train_loader)
+        nbatches_test = len(test_loader)
     else:
         # input and target at random
         def collate_wrapper(list_of_tuples):
@@ -809,6 +843,7 @@ if __name__ == "__main__":
 
     # training or inference
     best_gA_test = 0
+    best_gL_test = 1
     total_time = 0
     total_loss = 0
     total_accu = 0
@@ -834,6 +869,7 @@ if __name__ == "__main__":
         if not args.inference_only:
             optimizer.load_state_dict(ld_model["opt_state_dict"])
             best_gA_test = ld_gA_test
+            best_gL_test = ld_gL_test
             total_loss = ld_total_loss
             total_accu = ld_total_accu
             k = ld_k  # epochs
@@ -982,6 +1018,7 @@ if __name__ == "__main__":
                     is_best = gA_test > best_gA_test
                     if is_best:
                         best_gA_test = gA_test
+                        best_gL_test = gL_test
                         if not (args.save_model == ""):
                             print("Saving model to {}".format(args.save_model))
                             torch.save(
@@ -1009,8 +1046,10 @@ if __name__ == "__main__":
                             gL_test, gA_test * 100, best_gA_test * 100
                         )
                     )
+                    print("Best Acc {}, Loss {}".format(best_gA_test, best_gL_test))
 
             k += 1  # nepochs
+
 
     # profiling
     if args.enable_profiling:
