@@ -69,6 +69,9 @@ import numpy as np
 # pickle
 import pickle
 
+#nvidia apex
+from apex import amp
+
 # onnx
 import onnx
 
@@ -471,6 +474,9 @@ if __name__ == "__main__":
     # avazu database
     parser.add_argument("--avazu-db-path", type=str, default="")
 
+    # apex mode
+    parser.add_argument("--apex-mode", type=str, default="O0")
+
     # debugging and profiling
     parser.add_argument("--print-freq", type=int, default=1)
     parser.add_argument("--test-freq", type=int, default=-1)
@@ -513,7 +519,7 @@ if __name__ == "__main__":
         else:
             rp_mats = torch.tensor(pickle.load(open(args.rp_file,"rb")))
 
-    if use_fp16:
+    if (use_fp16 or args.apex_mode != "O0") and args.enable_rp:
         rp_mats = rp_mats.half()
 
     ### prepare training data ###
@@ -796,6 +802,10 @@ if __name__ == "__main__":
         # specify the optimizer algorithm
         optimizer = torch.optim.SGD(dlrm.parameters(), lr=args.learning_rate)
 
+        #use apex
+        dlrm, optimizer = amp.initialize(dlrm, optimizer,
+                opt_level=args.apex_mode)
+
     ### main loop ###
     def time_wrap(use_gpu):
         if use_gpu:
@@ -918,7 +928,10 @@ if __name__ == "__main__":
                     # (where we do not accumulate gradients across mini-batches)
                     optimizer.zero_grad()
                     # backward pass
-                    E.backward()
+
+                    #use apex
+                    with amp.scale_loss(E, optimizer) as scaled_loss:
+                        scaled_loss.backward()
                     # debug prints (check gradient norm)
                     # for l in mlp.layers:
                     #     if hasattr(l, 'weight'):
