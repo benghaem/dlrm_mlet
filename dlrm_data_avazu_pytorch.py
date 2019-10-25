@@ -19,28 +19,39 @@ class AvazuDataset(data.Dataset):
 
         self.db_cursor = self.db_conn.cursor()
 
-        total_items = self.db_cursor.execute("""SELECT Count(*) FROM data_cleaned""").fetchone()[0]
+        self.total_items = self.db_cursor.execute("""SELECT Count(*) FROM data_cleaned""").fetchone()[0]
+
+        self.m_den = 1
+        self.counts = None
+        self.n_emb = None
+
+        self.samples_index_lookup = None
+
+        self.chunk_size = chunk_size
+        self.data_chunk = None
+        self.chunk_range = None
+        self.split = split
 
         #per segment training -- just to start
-        indicies = np.arange(total_items)
+        indicies = np.arange(self.total_items)
 
-        #total randomization
-        indicies = np.random.permutation(indicies)
-
-        #split into five segments
+        #split into five segments 
+        # first four are for training, last 1 is for val / test
         indicies = np.array_split(indicies, 5)
-
-        #randomize each segment
-        #for i in range(len(indicies)):
-        #    indicies[i] = np.random.permutation(indicies[i])
 
         #train on the first 4 segements
         train_indicies = np.concatenate(indicies[:-1])
+
+        #total randomization of the first 4 segments
+        train_indicies = np.random.permutation(train_indicies)
 
         #split the last segment into val and test
         test_indicies = indicies[-1]
         val_indicies, test_indicies = np.array_split(test_indicies, 2)
 
+        #ranomize the test and val parts
+        test_indicies = np.random.permutation(test_indicies)
+        val_indicies = np.random.permutation(val_indicies)
 
         #we know the number of cols is small enough
         raw_from_db = list(self.db_cursor.execute("""SELECT count FROM col_counts"""))
@@ -51,17 +62,19 @@ class AvazuDataset(data.Dataset):
 
         print(f"Avazu opened: sparse = {self.n_emb}, dense = {self.m_den}")
 
-        if split == 'train':
+        if self.split == 'train':
             self.samples_index_lookup = train_indicies
-        if split == 'val':
+        if self.split == 'val':
             self.samples_index_lookup = val_indicies
-        if split == 'test':
+        if self.split == 'test':
             self.samples_index_lookup = test_indicies
 
-        self.chunk_size = chunk_size
-        self.data_chunk = None
-        self.chunk_range = None
+        self.shuffle()
 
+    def shuffle(self):
+
+        print("Shuffling indicies...")
+        self.samples_index_lookup = np.random.permutation(self.samples_index_lookup)
         self.load_chunk(0)
 
     #

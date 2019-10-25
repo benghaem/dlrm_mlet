@@ -155,6 +155,26 @@ class DLRM_Net(nn.Module):
 
         return emb_l
 
+    def create_linp(self, in_feat, out_feat, table_count):
+        emb_linp = nn.ModuleList()
+
+        print(f"Building linp {in_feat} -> {out_feat}")
+        for i in range(0, table_count):
+
+            LIN = nn.Linear(in_feat, out_feat, bias=False)
+
+            if (self.linp_init == "normal"):
+                nn.init.normal_(LIN.weight, mean=0.0, std=0.25)
+            elif (self.linp_init == "xavier"):
+                nn.init.xavier_normal_(LIN.weight)
+            elif (self.linp_init =="rp"):
+                LIN.weight.data = torch.transpose(torch.tensor(self.rp_mats[i],
+                        requires_grad=True), 0, 1)
+
+            emb_linp.append(LIN)
+
+        return emb_linp
+
     def __init__(
         self,
         m_spa=None,
@@ -169,7 +189,9 @@ class DLRM_Net(nn.Module):
         loss_threshold=0.0,
         ndevices=-1,
         enable_rp = False,
-        rp_mats = None
+        rp_mats = None,
+        enable_linp = False,
+        linp_init = None
     ):
         super(DLRM_Net, self).__init__()
 
@@ -194,8 +216,17 @@ class DLRM_Net(nn.Module):
             self.emb_l = self.create_emb(m_spa, ln_emb)
             self.bot_l = self.create_mlp(ln_bot, sigmoid_bot)
             self.top_l = self.create_mlp(ln_top, sigmoid_top)
+
             self.enable_rp = enable_rp
             self.rp_mats = rp_mats
+
+            self.enable_linp = enable_linp
+            self.linp_init = linp_init
+
+            if (self.enable_linp):
+                self.emb_linp = self.create_linp(m_spa,
+                                                 ln_bot[ln_bot.size -1],
+                                                 ln_emb.size)
 
 
     def apply_mlp(self, x, layers):
@@ -205,6 +236,15 @@ class DLRM_Net(nn.Module):
         # return x
         # approach 2: use Sequential container to wrap all layers
         return layers(x)
+
+    def apply_linp(self, ly, layers):
+        ly_pro = []
+        act_fn = nn.Identity()
+
+        for var_id, ly_o in enumerate(ly):
+            ly_pro.append(act_fn(layers[var_id](ly_o)))
+
+        return ly_pro
 
     def apply_emb(self, lS_o, lS_i, emb_l):
         # WARNING: notice that we are processing the batch at once. We implicitly
@@ -285,11 +325,14 @@ class DLRM_Net(nn.Module):
 
         # process sparse features(using embeddings), resulting in a list of row vectors
         ly = self.apply_emb(lS_o, lS_i, self.emb_l)
-        # for y in ly:
-        #     print(y.detach().cpu().numpy())
+
+        if (self.enable_linp):
+            ly_pro = self.apply_linp(ly, self.emb_linp)
+        else:
+            ly_pro = ly
 
         # interact features (dense and sparse)
-        z = self.interact_features(x, ly)
+        z = self.interact_features(x, ly_pro)
         # print(z.detach().cpu().numpy())
 
         # obtain probability of a click (using top mlp)
@@ -468,6 +511,13 @@ if __name__ == "__main__":
     parser.add_argument("--enable-rp", action="store_true", default=False)
     parser.add_argument("--rp-file", type=str, default="")
 
+    # linear projection
+    parser.add_argument("--enable-linp", action="store_true", default=False)
+    # normal, xaiver, rp
+    parser.add_argument("--linp-init", type=str, default="normal")
+    # none, sigmoid
+    parser.add_argument("--linp-act", type=str, default="none")
+
     # half_precision
     parser.add_argument("--fp16", action="store_true", default=False)
 
@@ -475,6 +525,7 @@ if __name__ == "__main__":
     parser.add_argument("--avazu-db-path", type=str, default="")
 
     # apex mode
+    parser.add_argument("--enable_amp",action="store_true", default=False)
     parser.add_argument("--apex-mode", type=str, default="O0")
 
     # debugging and profiling
@@ -570,12 +621,14 @@ if __name__ == "__main__":
                 split = 'train',
                 dup_to_mem = False,
                 chunk_size=3000000
+                #chunk_size=20000
             )
             test_data = dp_ava.AvazuDataset(
                 args.avazu_db_path,
                 split = 'val',
                 dup_to_mem = False,
                 chunk_size=5000000
+                #chunk_size=20000
             )
 
         #report model params
@@ -686,7 +739,9 @@ if __name__ == "__main__":
         )
 
     #TODO: Fix this check to match sizes
-    if m_spa != m_den_out and args.enable_rp == False:
+    if m_spa != m_den_out and \
+       args.enable_rp == False and \
+       args.enable_linp == False:
         sys.exit(
             "ERROR: arch-sparse-feature-size "
             + str(m_spa)
@@ -770,7 +825,9 @@ if __name__ == "__main__":
         sync_dense_params=args.sync_dense_params,
         loss_threshold=args.loss_threshold,
         enable_rp=args.enable_rp,
-        rp_mats=rp_mats
+        rp_mats=rp_mats,
+        enable_linp=args.enable_linp,
+        linp_init=args.linp_init
     )
     # test prints
     if args.debug_mode:
@@ -803,8 +860,13 @@ if __name__ == "__main__":
         optimizer = torch.optim.SGD(dlrm.parameters(), lr=args.learning_rate)
 
         #use apex
-        dlrm, optimizer = amp.initialize(dlrm, optimizer,
-                opt_level=args.apex_mode)
+        if args.enable_amp:
+            dlrm, optimizer = amp.initialize(dlrm, optimizer,
+                    opt_level=args.apex_mode)
+
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
+                                                    step_size=5,
+                                                    gamma=0.1)
 
     ### main loop ###
     def time_wrap(use_gpu):
@@ -930,8 +992,11 @@ if __name__ == "__main__":
                     # backward pass
 
                     #use apex
-                    with amp.scale_loss(E, optimizer) as scaled_loss:
-                        scaled_loss.backward()
+                    if (args.enable_amp):
+                        with amp.scale_loss(E, optimizer) as scaled_loss:
+                            scaled_loss.backward()
+                    else:
+                        E.backward()
                     # debug prints (check gradient norm)
                     # for l in mlp.layers:
                     #     if hasattr(l, 'weight'):
@@ -1049,6 +1114,9 @@ if __name__ == "__main__":
                     print("Best Acc {}, Loss {}".format(best_gA_test, best_gL_test))
 
             k += 1  # nepochs
+            #shuffle our dataset
+            train_loader.dataset.shuffle()
+            scheduler.step()
 
 
     # profiling
