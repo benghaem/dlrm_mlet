@@ -8,77 +8,127 @@
 #use unbuffered python for output
 dlrm_exe="python3 -u dlrm_s_pytorch.py"
 
-use_rclone=false
+use_rclone=true
 
+dlrm_model_root=/home/usr1/bghaem/mu/proj/dlrm/models
 dlrm_support_dir=/home/usr1/bghaem/mu/proj/dlrm/support
 
 echo "[INFO] Launch Pytorch"
+
+folder=$(date | sha1sum | head -c 6)
+echo "[INFO] $folder is the new log location"
+
+dlrm_log_dir="/home/usr1/bghaem/mu/proj/dlrm/avazu_redux_log/${folder}"
+dlrm_model_dir="${dlrm_model_root}/${folder}"
+mkdir -p $dlrm_log_dir
+mkdir -p $dlrm_model_dir
+
 
 generic_args="--arch-mlp-top "512-256-1" --data-generation dataset
 --data-set avazu
 --avazu-db-path ${dlrm_support_dir}/data/avazu.db
 --loss-function bce --round-targets True --learning-rate 0.2
 --mini-batch-size 128 --num-workers 0
---print-freq 5000 --print-time --test-freq 30000 
+--print-freq 5000 --print-time --test-freq 30000
 --nepochs 1 --use-gpu"
 
 rp_args="--enable-rp"
-
-folder=$(date | sha1sum | head -c 6)
-echo "[INFO] $folder is the new log location"
-
 echo "[INFO] generic args: \n $generic_args"
-dlrm_log_dir="/home/usr1/bghaem/mu/proj/dlrm/log/${folder}"
 
-mkdir -p $dlrm_log_dir
 
 # args: mlp-bot, sparse-feature-size
 run_vanilla() {
 
-    log_name="${dlrm_log_dir}/log_kaggle_dlrm_${2}.log"
+    log_name="${dlrm_log_dir}/log_dlrm_${2}.log"
     echo "[INFO] run dlrm --> mlp-bot: $1, sparse-feature-size: $2" \
           | tee $log_name
-    echo "[INFO] generic args ${generic_args}"
+    echo "[INFO] generic args ${generic_args}" \
+          | tee -a ${log_name}
 
     date | tee -a ${log_name}
     $dlrm_exe --arch-mlp-bot $1 \
               --arch-sparse-feature-size $2 \
+              --save-model ${dlrm_model_dir}/dlrm_${2}.m \
               $generic_args 2>&1 | tee -a ${log_name}
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name gd:emb/$folder
+        rclone copy $log_name utdrive:emb/$folder
+    fi
+}
+
+# args: mlp-bot-partial, sparse-feature-size-in, sparse-feature-size-out, init_fn
+run_linp() {
+
+    log_name="${dlrm_log_dir}/log_linp_${2}_${3}_${4}.log"
+    echo "[INFO] run linp --> mlp-bot: ${1}${3}, sparse-feature-size-out: ${2}" \
+          | tee $log_name
+    echo "                --> sparse-feature-size-out: ${3}, init_fn ${4}" \
+          | tee -a $log_name
+    echo "[INFO] generic args ${generic_args}" \
+          | tee -a $log_name
+
+    date | tee -a ${log_name}
+    $dlrm_exe --arch-mlp-bot ${1}${3} \
+              --arch-sparse-feature-size $2 \
+              --enable-linp \
+              --linp-init $4 \
+              --save-model ${dlrm_model_dir}/linp_${2}_${3}_${4}.m \
+              $generic_args 2>&1 | tee -a ${log_name}
+    date | tee -a $log_name
+    if [ "$use_rclone" = true ] ; then
+        rclone copy $log_name utdrive:emb/$folder
     fi
 }
 
 # args: mlp-bot, sparse-feature-size-in, sparse-feature-size-out, rp_file_name
 run_rp() {
 
-    log_name="${dlrm_log_dir}/log_kaggle_rp_${2}_${3}.log"
+    log_name="${dlrm_log_dir}/log_rp_${2}_${3}.log"
     echo "[INFO] run rp --> mlp-bot: ${1}, sparse-feature-size-in: ${2}" \
           | tee $log_name
     echo "              --> sparse-feature-size-out: ${3}, rp_file_name ${4}" \
           | tee -a $log_name
-    echo "[INFO] generic args ${generic_args}"
+    echo "[INFO] generic args ${generic_args}" \
+          | tee -a $log_name
 
     date | tee -a $log_name
     $dlrm_exe --arch-mlp-bot $1 \
               --arch-sparse-feature-size $2 \
+              --save-model ${dlrm_model_dir}/rp_${2}_${3}.m \
               $generic_args \
               $rp_args \
               --rp-file ${4} 2>&1 | tee -a $log_name
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name gd:emb/$folder
+        rclone copy $log_name utdrive:emb/$folder
     fi
 }
 
-#vanilla 64 
-#run_vanilla "1-512-256-64-64" 64 !!(Too big for GTX2080)!!
+#vanilla 4
+
+export CUDA_VISIBLE_DEVICES=0
+
+run_linp "1-256-128-" 64 4 normal
+
+run_linp "1-256-128-" 64 8 normal
+
+run_linp "1-256-128-" 64 16 normal
+
+exit
+
 
 #vanilla 32
 #run_vanilla "1-512-256-64-32" 32 !!(Too big for GTX2080)!!
 
+export CUDA_VISIBLE_DEVICES=1
 
+run_linp "1-256-64-" 64 4 normal
+
+run_linp "1-256-64-" 64 8 normal
+
+run_linp "1-256-64-" 64 16 normal
+
+exit
 
 export CUDA_VISIBLE_DEVICES=0
 #vanilla 32
