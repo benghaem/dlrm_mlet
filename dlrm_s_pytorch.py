@@ -158,7 +158,7 @@ class DLRM_Net(nn.Module):
     def create_linp(self, in_feat, out_feat, table_count):
         emb_linp = nn.ModuleList()
 
-        print(f"Building linp {in_feat} -> {out_feat}")
+        print("Building linp {} -> {}".format(in_feat, out_feat))
         for i in range(0, table_count):
 
             LIN = nn.Linear(in_feat, out_feat, bias=False)
@@ -523,6 +523,7 @@ if __name__ == "__main__":
 
     # avazu database
     parser.add_argument("--avazu-db-path", type=str, default="")
+    parser.add_argument("--avazu-epoch-shuffle", action="store_true", default=False)
 
     # apex mode
     parser.add_argument("--enable_amp",action="store_true", default=False)
@@ -1115,7 +1116,8 @@ if __name__ == "__main__":
 
             k += 1  # nepochs
             #shuffle our dataset
-            train_loader.dataset.shuffle()
+            if (args.avazu_epoch_shuffle):
+                train_loader.dataset.shuffle()
             scheduler.step()
 
 
