@@ -70,7 +70,7 @@ class AvazuDataset(data.Dataset):
         self.counts = np.array(raw_from_db).flatten()
         self.n_emb = len(self.counts)
 
-        print(f"Avazu opened: sparse = {self.n_emb}, dense = {self.m_den}")
+        print("Avazu opened: sparse = {}, dense = {}".format(self.n_emb, self.m_den))
 
         if self.split == 'train':
             self.samples_index_lookup = train_indicies
@@ -91,7 +91,7 @@ class AvazuDataset(data.Dataset):
     # load [start, start+chunk_size) to local storage
     def load_chunk(self, start):
 
-        print(f"INFO: Loading chunk @ {start}")
+        print("INFO: Loading chunk @ {}".format(start))
 
         self.data_chunk = []
         end = self.chunk_size + start
@@ -100,14 +100,14 @@ class AvazuDataset(data.Dataset):
 
             # log every million
             if (ii % 1000000==0):
-                print(f"chunk loading {start} @ {ii} / {total_to_convert}")
+                print("chunk loading {} @ {} / {}".format(start,ii,total_to_convert))
 
             #sqlite rows are indexed from 1
             sql_raw_row = target_row + 1
 
-            data_tuple = self.db_cursor.execute(f"""SELECT * FROM data_cleaned
-                                                   WHERE rowid = {sql_raw_row}
-                                                """).fetchone()
+            data_tuple = self.db_cursor.execute("""SELECT * FROM data_cleaned
+                                                   WHERE rowid = {}
+                                                """.format(sql_raw_row)).fetchone()
 
             X_int = torch.tensor((data_tuple[2], ), dtype=torch.float)
             X_cat = torch.tensor(data_tuple[3:], dtype=torch.long)
