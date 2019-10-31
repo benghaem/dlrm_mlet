@@ -6,7 +6,7 @@ import numpy as np
 class AvazuDataset(data.Dataset):
 
     def __init__(self, db_path, split="train", dup_to_mem=True,
-            chunk_size=3000000):
+            chunk_size=3000000, split_type="random", random_seed=123):
         self.db_conn = sq3.connect(db_path)
 
         if (dup_to_mem):
@@ -35,6 +35,15 @@ class AvazuDataset(data.Dataset):
         #per segment training -- just to start
         indicies = np.arange(self.total_items)
 
+        if (split_type == "random"):
+
+            # !!DANGER!!
+            # these two lines must be kept together or
+            # train / test could merge
+            np.random.seed(random_seed)
+            indicies = np.random.permutation(indicies)
+            # !!DANGER!!
+
         #split into five segments 
         # first four are for training, last 1 is for val / test
         indicies = np.array_split(indicies, 5)
@@ -47,9 +56,10 @@ class AvazuDataset(data.Dataset):
 
         #split the last segment into val and test
         test_indicies = indicies[-1]
-        val_indicies, test_indicies = np.array_split(test_indicies, 2)
 
-        #ranomize the test and val parts
+        #randomize the last segment and split
+        # order is important here
+        val_indicies, test_indicies = np.array_split(test_indicies, 2)
         test_indicies = np.random.permutation(test_indicies)
         val_indicies = np.random.permutation(val_indicies)
 
