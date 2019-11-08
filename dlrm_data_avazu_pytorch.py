@@ -2,11 +2,14 @@ import sqlite3 as sq3
 import torch
 from torch.utils import data
 import numpy as np
+import math
 
 class AvazuDataset(data.Dataset):
 
     def __init__(self, db_path, split="train", dup_to_mem=True,
-            chunk_size=3000000, split_type="random", random_seed=123):
+            chunk_size=1000, split_type="random", random_seed=123,
+            total_workers=1):
+
         self.db_conn = sq3.connect(db_path)
 
         if (dup_to_mem):
@@ -18,6 +21,10 @@ class AvazuDataset(data.Dataset):
             on_disk_conn.close()
 
         self.db_cursor = self.db_conn.cursor()
+
+        ##reduce memory usage by removing unneeded table from memory
+        if (dup_to_mem):
+            self.db_cursor.execute("""DROP TABLE data""")
 
         self.total_items = self.db_cursor.execute("""SELECT Count(*) FROM data_cleaned""").fetchone()[0]
 
@@ -81,48 +88,73 @@ class AvazuDataset(data.Dataset):
 
         self.shuffle()
 
+        # lazy load chunk when needed, initially we have no chunk loaded
+        self.chunk_range = (-1,-1)
+
+        # preallocate chunk
+        self.data_chunk = [None] * self.chunk_size
+
     def shuffle(self):
 
         print("Shuffling indicies...")
         self.samples_index_lookup = np.random.permutation(self.samples_index_lookup)
-        self.load_chunk(0)
+        #self.load_chunk(0)
 
     #
     # load [start, start+chunk_size) to local storage
     def load_chunk(self, start):
 
-        print("INFO: Loading chunk @ {}".format(start))
+        #print("INFO: Loading chunk @ {}".format(start))
 
-        self.data_chunk = []
-        end = self.chunk_size + start
-        total_to_convert = end - start
-        for ii, target_row in enumerate(self.samples_index_lookup[start:end]):
+        total_to_convert = self.chunk_size
+        end = start + self.chunk_size
 
-            # log every million
-            if (ii % 1000000==0):
-                print("chunk loading {} @ {} / {}".format(start,ii,total_to_convert))
+        op_count = 20000
+        subblock_start = 0
+        total_sb = math.ceil(self.chunk_size / op_count)
 
-            #sqlite rows are indexed from 1
-            sql_raw_row = target_row + 1
+        general_qmark_string = qmark_string = ", ".join(["?" for i in range(op_count)])
 
-            data_tuple = self.db_cursor.execute("""SELECT * FROM data_cleaned
-                                                   WHERE rowid = {}
-                                                """.format(sql_raw_row)).fetchone()
+        #do operations in blocks of 20k
+        for c in range(total_sb):
+            # log every 10 blocks
 
-            X_int = torch.tensor((data_tuple[2], ), dtype=torch.float)
-            X_cat = torch.tensor(data_tuple[3:], dtype=torch.long)
-            y = torch.tensor(data_tuple[1], dtype=torch.float)
 
-            self.data_chunk.append((X_int, X_cat, y))
+            qmark_string = None
+            if (total_to_convert > op_count):
+                subblock_end = subblock_start + op_count
+                qmark_string = general_qmark_string
+            else:
+                subblock_end = subblock_start + total_to_convert
+                qmark_string = ", ".join(["?" for i in range(total_to_convert)])
 
+            ids = []
+            #print("chunk loading block {} -> {}".format(start+subblock_start,start+subblock_end))
+            for ii, target_row in enumerate(self.samples_index_lookup[start+subblock_start:start+subblock_end]):
+                sql_raw_row = target_row + 1
+                ids.append(int(target_row))
+
+            query = """SELECT * FROM data_cleaned WHERE rowid IN ({})""".format(qmark_string)
+
+            for ii, data_tuple in enumerate(self.db_cursor.execute(query, ids)):
+
+                #sqlite rows are indexed from 1
+                X_int = torch.tensor((data_tuple[2], ), dtype=torch.float)
+                X_cat = torch.tensor(data_tuple[3:], dtype=torch.long)
+                y = torch.tensor(data_tuple[1], dtype=torch.float)
+
+                self.data_chunk[ii+subblock_start] = (X_int, X_cat, y)
+
+            subblock_start = subblock_end
+            total_to_convert -= op_count
+
+        #print("loaded range: {} -> {}".format(start,end))
         self.chunk_range = (start,end)
-
 
     def __len__(self):
         return len(self.samples_index_lookup)
 
     def __getitem__(self, index):
-
 
         chunk_start = self.chunk_range[0]
         chunk_end = self.chunk_range[1]
@@ -149,6 +181,7 @@ class AvazuDataset(data.Dataset):
         else:
             rel_index = index - chunk_start
 
+        #print(index, self.data_chunk[rel_index])
         return self.data_chunk[rel_index]
 
 
