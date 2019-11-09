@@ -104,7 +104,7 @@ class AvazuDataset(data.Dataset):
     # load [start, start+chunk_size) to local storage
     def load_chunk(self, start):
 
-        #print("INFO: Loading chunk @ {}".format(start))
+        print("INFO: Loading chunk @ {}".format(start))
 
         total_to_convert = self.chunk_size
         end = start + self.chunk_size
@@ -123,16 +123,24 @@ class AvazuDataset(data.Dataset):
             qmark_string = None
             if (total_to_convert > op_count):
                 subblock_end = subblock_start + op_count
-                qmark_string = general_qmark_string
             else:
                 subblock_end = subblock_start + total_to_convert
-                qmark_string = ", ".join(["?" for i in range(total_to_convert)])
 
             ids = []
-            #print("chunk loading block {} -> {}".format(start+subblock_start,start+subblock_end))
+            print("chunk loading block {} -> {}".format(start+subblock_start,start+subblock_end))
             for ii, target_row in enumerate(self.samples_index_lookup[start+subblock_start:start+subblock_end]):
                 sql_raw_row = target_row + 1
                 ids.append(int(target_row))
+
+            # if we have a shorter list of ids near the end
+            if (len(ids) != op_count):
+                qmark_string = ", ".join(["?" for i in range(len(ids))])
+            else:
+                qmark_string = general_qmark_string
+
+            #break out early if we have no more ids to process
+            if (len(ids) == 0):
+                break
 
             query = """SELECT * FROM data_cleaned WHERE rowid IN ({})""".format(qmark_string)
 
