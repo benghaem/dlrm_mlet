@@ -70,7 +70,7 @@ import numpy as np
 import pickle
 
 #nvidia apex
-from apex import amp
+# from apex import amp
 
 # onnx
 import onnx
@@ -83,6 +83,7 @@ from torch.nn.parallel.parallel_apply import parallel_apply
 from torch.nn.parallel.replicate import replicate
 from torch.nn.parallel.scatter_gather import gather, scatter
 
+from sklearn.metrics import roc_auc_score
 
 # from torchviz import make_dot
 # import torch.nn.functional as Functional
@@ -189,8 +190,13 @@ class DLRM_Net(nn.Module):
         loss_threshold=0.0,
         ndevices=-1,
         enable_rp = False,
+        enable_rp_up = False,
         rp_mats = None,
+        rpup_mats = None,
         enable_linp = False,
+        enable_linp_up = False,
+        proj_down_dim = -1,
+        proj_up_dim = -1,
         linp_init = None
     ):
         super(DLRM_Net, self).__init__()
@@ -218,16 +224,31 @@ class DLRM_Net(nn.Module):
             self.top_l = self.create_mlp(ln_top, sigmoid_top)
 
             self.enable_rp = enable_rp
+            self.enable_rp_up = enable_rp_up
             self.rp_mats = rp_mats
+            self.rpup_mats = rpup_mats
 
             self.enable_linp = enable_linp
-            self.linp_init = linp_init
+            self.enable_linp_up = enable_linp_up
+            if (self.enable_linp_up):
+                self.proj_down_dim = proj_down_dim
+            else:
+                self.proj_down_dim = ln_bot[ln_bot.size -1]
 
+            if (proj_up_dim != -1):
+                self.proj_up_dim = proj_up_dim
+            else:
+                self.proj_up_dim = m_spa
+
+            self.linp_init = linp_init
             if (self.enable_linp):
                 self.emb_linp = self.create_linp(m_spa,
-                                                 ln_bot[ln_bot.size -1],
+                                                 self.proj_down_dim,
                                                  ln_emb.size)
-
+            if (self.enable_linp_up):
+                self.emb_linp_up = self.create_linp(self.proj_down_dim,
+                                                    self.proj_up_dim,
+                                                    ln_emb.size)
 
     def apply_mlp(self, x, layers):
         # approach 1: use ModuleList
@@ -245,6 +266,13 @@ class DLRM_Net(nn.Module):
             ly_pro.append(act_fn(layers[var_id](ly_o)))
 
         return ly_pro
+
+    # def apply_linp_up(self, ly, layers):
+    #     ly_pro = []
+    #     act_fn = nn.Identity()
+
+    #     for var_id, ly_o in enumerate(ly):
+    #         ly_pro.append(act_fn(layers[var_id](ly_o)))
 
     def apply_emb(self, lS_o, lS_i, emb_l):
         # WARNING: notice that we are processing the batch at once. We implicitly
@@ -269,7 +297,12 @@ class DLRM_Net(nn.Module):
             if self.enable_rp:
                 RP = self.rp_mats[k]
                 V_RP = torch.matmul(V,RP)
-                ly.append(V_RP)
+                if self.enable_rp_up:
+                    RPUP = self.rpup_mats[k]
+                    V_RP_RPUP = torch.matmul(V_RP, RPUP)
+                    ly.append(V_RP_RPUP)
+                else:
+                    ly.append(V_RP)
             else:
                 ly.append(V)
 
@@ -328,8 +361,12 @@ class DLRM_Net(nn.Module):
 
         if (self.enable_linp):
             ly_pro = self.apply_linp(ly, self.emb_linp)
+            if (self.enable_linp_up):
+                ly_pro = self.apply_linp(ly_pro, self.emb_linp_up)
         else:
             ly_pro = ly
+            if (self.enable_linp_up):
+                ly_pro = self.apply_linp(ly_pro, self.emb_linp_up)
 
         # interact features (dense and sparse)
         z = self.interact_features(x, ly_pro)
@@ -510,9 +547,14 @@ if __name__ == "__main__":
     # random projection
     parser.add_argument("--enable-rp", action="store_true", default=False)
     parser.add_argument("--rp-file", type=str, default="")
+    parser.add_argument("--enable-rp-up", action="store_true", default=False)
+    parser.add_argument("--rpup-file", type=str, default="")
 
     # linear projection
     parser.add_argument("--enable-linp", action="store_true", default=False)
+    parser.add_argument("--enable-linp-up", action="store_true", default=False)
+    parser.add_argument("--proj-down-dim", type=int, default=4)
+    parser.add_argument("--proj-up-dim", type=int, default=-1)
     # normal, xaiver, rp
     parser.add_argument("--linp-init", type=str, default="normal")
     # none, sigmoid
@@ -528,6 +570,8 @@ if __name__ == "__main__":
     # apex mode
     parser.add_argument("--enable_amp",action="store_true", default=False)
     parser.add_argument("--apex-mode", type=str, default="O0")
+
+    parser.add_argument("--auc-only",action="store_true", default=False)
 
     # debugging and profiling
     parser.add_argument("--print-freq", type=int, default=1)
@@ -564,6 +608,7 @@ if __name__ == "__main__":
 
     ### prepare RP matrcies ###
     rp_mats = None
+    rpup_mats = None
     if args.enable_rp:
         if use_gpu:
             rp_mats = torch.tensor(pickle.load(open(args.rp_file,"rb")),
@@ -571,8 +616,18 @@ if __name__ == "__main__":
         else:
             rp_mats = torch.tensor(pickle.load(open(args.rp_file,"rb")))
 
+    if args.enable_rp_up:
+        if use_gpu:
+            rpup_mats = torch.tensor(pickle.load(open(args.rpup_file, "rb")),
+                                    device=device)
+        else:
+            rpup_mats = torch.tensor(pickle.load(open(args.rpup_file, "rb")))
+
     if (use_fp16 or args.apex_mode != "O0") and args.enable_rp:
         rp_mats = rp_mats.half()
+
+    if (use_fp16 or args.apex_mode != "O0") and args.enable_rp_up:
+        rpup_mats = rpup_mats.half()
 
     ### prepare training data ###
     ln_bot = np.fromstring(args.arch_mlp_bot, dtype=int, sep="-")
@@ -621,8 +676,8 @@ if __name__ == "__main__":
                 args.avazu_db_path,
                 split = 'train',
                 dup_to_mem = False,
-                chunk_size=3000000
-                #chunk_size=20000
+                # chunk_size=3000000
+                chunk_size=16384
             )
             test_data = dp_ava.AvazuDataset(
                 args.avazu_db_path,
@@ -826,8 +881,13 @@ if __name__ == "__main__":
         sync_dense_params=args.sync_dense_params,
         loss_threshold=args.loss_threshold,
         enable_rp=args.enable_rp,
+        enable_rp_up=args.enable_rp_up,
         rp_mats=rp_mats,
+        rpup_mats=rpup_mats,
         enable_linp=args.enable_linp,
+        enable_linp_up=args.enable_linp_up,
+        proj_down_dim=args.proj_down_dim,
+        proj_up_dim=args.proj_up_dim,
         linp_init=args.linp_init
     )
     # test prints
@@ -950,6 +1010,28 @@ if __name__ == "__main__":
                 ld_nbatches_test, ld_gL_test, ld_gA_test * 100
             )
         )
+        if (args.auc_only):
+            test_accu = 0
+            test_loss = 0
+            size = args.mini_batch_size * len(test_loader)
+            print("size of test set: " + str(size))
+            y_true = np.zeros(size)
+            y_score = np.zeros(size)
+            for jt, (X_test, lS_o_test, lS_i_test, T_test) in enumerate(test_loader):
+                # forward pass
+                Z_test = dlrm_wrap(
+                        X_test, lS_o_test, lS_i_test, use_gpu, use_fp16, device
+                        )
+                Z_np = Z_test.detach().cpu().numpy().reshape(1, len(Z_test))
+                T_np = T_test.detach().cpu().numpy().reshape(1, len(T_test))
+                b = jt * len(Z_test)
+                e = b + len(Z_test)
+                y_true[b:e] = T_np[:]
+                y_score[b:e] = Z_np[:]
+
+            auc = roc_auc_score(y_true, y_score)
+            print("AUC = {:.12f}".format(auc))
+            sys.exit()
 
     print("time/loss/accuracy (if enabled):")
     with torch.autograd.profiler.profile(args.enable_profiling, use_gpu) as prof:
