@@ -571,7 +571,9 @@ if __name__ == "__main__":
     parser.add_argument("--enable_amp",action="store_true", default=False)
     parser.add_argument("--apex-mode", type=str, default="O0")
 
+    # auc metric
     parser.add_argument("--auc-only",action="store_true", default=False)
+    parser.add_argument("--enable-auc",action="store_true", default=True)
 
     # debugging and profiling
     parser.add_argument("--print-freq", type=int, default=1)
@@ -967,6 +969,7 @@ if __name__ == "__main__":
     # training or inference
     best_gA_test = 0
     best_gL_test = 1
+    best_auc = 0.0
     total_time = 0
     total_loss = 0
     total_accu = 0
@@ -989,10 +992,12 @@ if __name__ == "__main__":
         ld_total_accu = ld_model["total_accu"]
         ld_gA_test = ld_model["test_acc"]
         ld_gL_test = ld_model["test_loss"]
+        ld_auc = ld_model["auc"]
         if not args.inference_only:
             optimizer.load_state_dict(ld_model["opt_state_dict"])
             best_gA_test = ld_gA_test
             best_gL_test = ld_gL_test
+            best_auc = ld_auc
             total_loss = ld_total_loss
             total_accu = ld_total_accu
             k = ld_k  # epochs
@@ -1128,6 +1133,11 @@ if __name__ == "__main__":
                     test_accu = 0
                     test_loss = 0
 
+                    if (args.enable_auc):
+                        auc_arr_sz = args.mini_batch_size * len(test_loader)
+                        auc_y_true = np.zeros(auc_arr_sz)
+                        auc_y_score = np.zeros(auc_arr_sz)
+
                     for jt, (X_test, lS_o_test, lS_i_test, T_test) in enumerate(test_loader):
                         # early exit if nbatches was set by the user and has been exceeded
                         if jt >= nbatches:
@@ -1160,6 +1170,19 @@ if __name__ == "__main__":
                         test_accu += A_test
                         test_loss += L_test
 
+                        if (args.enable_auc):
+                            Z_np = S_test.reshape(1, len(S_test))
+                            T_np = T_test.reshape(1, len(T_test))
+                            b = jt * len(Z_test)
+                            e = b + len(Z_test)
+                            auc_y_true[b:e] = T_np[:]
+                            auc_y_score[b:e] = Z_np[:]
+
+                    auc = 0.0
+                    if (args.enable_auc):
+                        auc = roc_auc_score(auc_y_true, auc_y_score)
+                        print("AUC = {:.12f}".format(auc))
+
                     gL_test = test_loss / nbatches_test
                     gA_test = test_accu / nbatches_test
 
@@ -1167,6 +1190,7 @@ if __name__ == "__main__":
                     if is_best:
                         best_gA_test = gA_test
                         best_gL_test = gL_test
+                        best_auc = auc
                         if not (args.save_model == ""):
                             print("Saving model to {}".format(args.save_model))
                             torch.save(
@@ -1184,17 +1208,18 @@ if __name__ == "__main__":
                                     "total_loss": total_loss,
                                     "total_accu": total_accu,
                                     "opt_state_dict": optimizer.state_dict(),
+                                    "auc" : auc,
                                 },
                                 args.save_model,
                             )
 
                     print(
                         "Testing at - {}/{} of epoch {}, ".format(j + 1, nbatches, 0)
-                        + "loss {:.6f}, accuracy {:3.3f} %, best {:3.3f} %".format(
-                            gL_test, gA_test * 100, best_gA_test * 100
+                        + "loss {:.6f}, accuracy {:3.3f} %, best {:3.3f} %, auc {:.12f}".format(
+                            gL_test, gA_test * 100, best_gA_test * 100, auc
                         )
                     )
-                    print("Best Acc {}, Loss {}".format(best_gA_test, best_gL_test))
+                    print("Best Acc {}, Loss {}, AUC {}".format(best_gA_test, best_gL_test, best_auc))
 
             k += 1  # nepochs
             #shuffle our dataset
