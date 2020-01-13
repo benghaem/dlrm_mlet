@@ -105,7 +105,6 @@ class CriteoDataset(Dataset):
 
         print("Split data according to indices...")
 
-
     def __getitem__(self, index):
 
         if isinstance(index, slice):
@@ -116,7 +115,6 @@ class CriteoDataset(Dataset):
 
         return X_int, X_cat, y
 
-
     def _default_preprocess(self, X_int, X_cat, y):
         X_int = torch.log(torch.tensor(X_int, dtype=torch.float) + 1)
         X_cat = torch.tensor(X_cat, dtype=torch.long)
@@ -124,7 +122,6 @@ class CriteoDataset(Dataset):
         # print("Converted to tensors...done!")
 
         return X_int, X_cat, y
-
 
     def __len__(self):
         return len(self.samples_list)

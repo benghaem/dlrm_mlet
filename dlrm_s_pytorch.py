@@ -1177,6 +1177,8 @@ if __name__ == "__main__":
                             e = b + len(Z_test)
                             auc_y_true[b:e] = T_np[:]
                             auc_y_score[b:e] = Z_np[:]
+                            del T_np
+
 
                     auc = 0.0
                     if (args.enable_auc):

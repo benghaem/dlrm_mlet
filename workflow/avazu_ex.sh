@@ -30,7 +30,7 @@ generic_args="--arch-mlp-top "512-256-1" --data-generation dataset
 --loss-function bce --round-targets True --learning-rate 0.2
 --mini-batch-size 128 --num-workers 0
 --print-freq 5000 --print-time --test-freq 30000
---nepochs 1 --use-gpu"
+--nepochs 1 --use-gpu --numpy-rand-seed 882"
 
 rp_args="--enable-rp"
 echo "[INFO] generic args: \n $generic_args"
@@ -80,10 +80,11 @@ run_linp() {
     fi
 }
 
-# args: mlp-bot, sparse-feature-size-in, sparse-feature-size-out, rp_file_name
+# args: mlp-bot, sparse-feature-size-in, sparse-feature-size-out, rp_file_name,
+# extra
 run_rp() {
 
-    log_name="${dlrm_log_dir}/log_rp_${2}_${3}.log"
+    log_name="${dlrm_log_dir}/log_rp_${2}_${3}_${5}.log"
     echo "[INFO] run rp --> mlp-bot: ${1}, sparse-feature-size-in: ${2}" \
           | tee $log_name
     echo "              --> sparse-feature-size-out: ${3}, rp_file_name ${4}" \
@@ -94,7 +95,7 @@ run_rp() {
     date | tee -a $log_name
     $dlrm_exe --arch-mlp-bot $1 \
               --arch-sparse-feature-size $2 \
-              --save-model ${dlrm_model_dir}/rp_${2}_${3}.m \
+              --save-model ${dlrm_model_dir}/rp_${2}_${3}_${5}.m \
               $generic_args \
               $rp_args \
               --rp-file ${4} 2>&1 | tee -a $log_name
@@ -106,13 +107,25 @@ run_rp() {
 
 #vanilla 4
 
+
+#run_linp "1-256-128-" 64 4 normal
+#
+#run_linp "1-256-128-" 64 8 normal
+#
+#run_linp "1-256-128-" 64 16 normal
+
+
+
+#RP 64->4
 export CUDA_VISIBLE_DEVICES=0
+run_rp "1-256-128-8" 64 8 ${dlrm_support_dir}/rp_matrices/rpm_64_8_mu_i1.bin 882_1
+run_rp "1-256-128-8" 64 8 ${dlrm_support_dir}/rp_matrices/rpm_64_8_mu_i2.bin 882_2
+run_rp "1-256-128-8" 64 8 ${dlrm_support_dir}/rp_matrices/rpm_64_8_mu_i3.bin 882_3
+run_rp "1-256-128-8" 64 8 ${dlrm_support_dir}/rp_matrices/rpm_64_8_mu_i4.bin 882_4
+run_rp "1-256-128-8" 64 8 ${dlrm_support_dir}/rp_matrices/rpm_64_8_mu_i5.bin 882_5
+run_rp "1-256-128-8" 64 8 ${dlrm_support_dir}/rp_matrices/rpm_64_8_mu_i6.bin 882_6
+run_rp "1-256-128-8" 64 8 ${dlrm_support_dir}/rp_matrices/rpm_64_8_mu_i7.bin 882_7
 
-run_linp "1-256-128-" 64 4 normal
-
-run_linp "1-256-128-" 64 8 normal
-
-run_linp "1-256-128-" 64 16 normal
 
 exit
 

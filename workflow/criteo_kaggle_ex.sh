@@ -5,28 +5,28 @@
 # LICENSE file in the root directory of this source tree.
 #
 
-dlrm_exe="python3 /tmp/dlrm_rp/dlrm_s_pytorch.py"
+dlrm_exe="python3 -u dlrm_s_pytorch.py"
 
 use_rclone=false
 
-dlrm_support_dir=/tmp/dlrm_support
+dlrm_support_dir=/home/usr1/bghaem/mu/proj/dlrm/support
 
 echo "[INFO] Launch Pytorch"
 
 generic_args="--arch-mlp-top "512-256-1" --data-generation dataset
 --data-set kaggle
 --processed-data-file ${dlrm_support_dir}/data/kaggle_processed.npz
---loss-function mse --round-targets True --learning-rate 0.2
+--loss-function bce --round-targets True --learning-rate 0.2
 --mini-batch-size 128 --num-workers 0
 --print-freq 128 --print-time --test-freq 3000 
---nepochs 1 --use-gpu --apex-mode O3"
+--nepochs 1 --use-gpu"
 
 rp_args="--enable-rp"
 
 folder=$(date | sha1sum | head -c 6)
 echo "[INFO] $folder is the new log location"
 
-log_dir=/tmp/dlrm_logs/${folder}
+log_dir=/tmp/kaggle_logs/${folder}
 mkdir -p $log_dir
 
 echo "[INFO] generic args: $generic_args"
@@ -34,8 +34,7 @@ echo "[INFO] generic args: $generic_args"
 # args: mlp-bot, sparse-feature-size
 run_vanilla() {
 
-    log_name="${log_dir}/log_kaggle_dlrm_${2}.log"
-    echo "[INFO] run dlrm --> mlp-bot: $1, sparse-feature-size: $2" \
+    log_name="${log_dir}/log_kaggle_dlrm_${2}.log" echo "[INFO] run dlrm --> mlp-bot: $1, sparse-feature-size: $2" \
           | tee $log_name
 
     date | tee -a $log_name
@@ -83,7 +82,8 @@ run_rp() {
 #DLRM 4
 
 export CUDA_VISIBLE_DEVICES=0
-run_vanilla "13-512-256-64-4" 4 &
+run_vanilla "13-512-256-64-4" 4 
+exit
 
 export CUDA_VISIBLE_DEVICES=1
 run_vanilla "13-512-256-64-8" 8 &
