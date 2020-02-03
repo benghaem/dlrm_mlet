@@ -5,6 +5,7 @@ import pickle
 import math
 import torch
 import os.path
+import sys
 
 def gen_dense(rows, cols):
     return np.random.normal(loc=0.0, scale = 0.25, size=(rows,cols)) 
@@ -58,6 +59,7 @@ if __name__ == "__main__":
 
     if os.path.exists(args.o):
         print("File exists")
+        sys.exit(1)
     else:
         pickle.dump(qq, open(args.o, 'wb'))
 

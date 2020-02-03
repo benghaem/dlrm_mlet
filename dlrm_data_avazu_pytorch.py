@@ -127,7 +127,7 @@ class AvazuDataset(data.Dataset):
                 subblock_end = subblock_start + total_to_convert
 
             ids = []
-            print("chunk loading block {} -> {}".format(start+subblock_start,start+subblock_end))
+            #print("chunk loading block {} -> {}".format(start+subblock_start,start+subblock_end))
             for ii, target_row in enumerate(self.samples_index_lookup[start+subblock_start:start+subblock_end]):
                 sql_raw_row = target_row + 1
                 ids.append(int(target_row))

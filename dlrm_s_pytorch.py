@@ -679,7 +679,7 @@ if __name__ == "__main__":
                 split = 'train',
                 dup_to_mem = False,
                 # chunk_size=3000000
-                chunk_size=16384
+                chunk_size=300000
             )
             test_data = dp_ava.AvazuDataset(
                 args.avazu_db_path,
