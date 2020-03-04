@@ -35,9 +35,9 @@ generic_args = {
 avazu_args = {"data-set": "avazu", "avazu-db-path": dlrm_support_dir + "/data/avazu.db"}
 
 criteo_kaggle_args = {
-             "data-set": "kaggle",
-              "processed-data-file": dlrm_support_dir + "/data/kaggle_processed.npz",
-        }
+    "data-set": "kaggle",
+    "processed-data-file": dlrm_support_dir + "/data/kaggle_processed.npz",
+}
 
 test_run_args = {"num-batches": 1000}
 
@@ -83,7 +83,7 @@ def gen_log_path(name, seed, dataset):
     return dlrm_output_dir + "/{}/log/{}_{}.log".format(dataset, name, seed)
 
 
-class rp_config:
+class RPConfig:
     def __init__(
         self, mlp_bot_partial, size_in, size_out, rp_file_tuple=None, rp_file_id=None
     ):
@@ -118,9 +118,9 @@ class LinConfig:
         self.init_fn = init_fn
 
     def get_name(self):
-        return "dlrm_lin_{}_{}_{}".format(self.sparse_feat_size_in,
-                                        self.sparse_feat_size_out,
-                                        self.init_fn)
+        return "dlrm_lin_{}_{}_{}".format(
+            self.sparse_feat_size_in, self.sparse_feat_size_out, self.init_fn
+        )
 
     def extra_args(self):
         args = {}
@@ -130,7 +130,8 @@ class LinConfig:
         args["enable-linp"] = None
         return args
 
-class VanillaConfig():
+
+class VanillaConfig:
     def __init__(self, mlp_bot_partial, size):
         self.mlp_bot_partial = mlp_bot_partial
         self.size = size
@@ -140,7 +141,73 @@ class VanillaConfig():
 
     def extra_args(self):
         args = {}
+        args["arch-mlp-bot"] = self.mlp_bot_partial + str(self.size)
+        args["arch-sparse-feature-size"] = self.size
         return args
+
+
+class UpDownConfig:
+    def __init__(
+        self,
+        mlp_bot_partial,
+        size_in,
+        size_mid,
+        size_out,
+        down_mode,
+        up_mode,
+        init_fn="normal",
+    ):
+        self.mlp_bot_partial = mlp_bot_partial
+
+        if down_mode == "rp":
+            down_rp_file_tuple = gen_rp_mat(size_in, size_mid)
+            self.rp_file_down = down_rp_file_tuple[0]
+            self.rp_file_down_id = down_rp_file_tuple[1]
+
+        if up_mode == "rp":
+            up_rp_file_tuple = gen_rp_mat(size_mid, size_out)
+            self.rp_file_up = up_rp_file_tuple[0]
+            self.rp_file_up_id = up_rp_file_tuple[1]
+
+        self.init_fn = init_fn
+        self.up_mode = up_mode
+        self.down_mode = down_mode
+        self.size_in = size_in
+        self.size_mid = size_mid
+        self.size_out = size_out
+
+    def get_name(self):
+        base_name = "dlrm_up_down_{}_{}_{}_{}_{}".format(
+            self.up_mode, self.down_mode, self.size_in, self.size_mid, self.size_out
+        )
+
+        if self.down_mode == "linp" or self.up_mode == "linp":
+            base_name += "_{}".format(self.init_fn)
+
+        return base_name
+
+    def extra_args(self):
+        args = {}
+        args["arch-mlp-bot"] = self.mlp_bot_partial + str(self.size_out)
+        args["arch-sparse-feature-size"] = self.size_in
+
+        if self.down_mode == "rp":
+            raise NotImplementedError
+        elif self.down_mode == "linp":
+            args["enable-linp"] = None
+            args["linp-init"] = self.init_fn
+            args["proj-down-dim"] = self.size_mid
+        else:
+            raise NotImplementedError
+
+        if self.up_mode == "rp":
+            raise NotImplementedError
+        elif self.up_mode == "linp":
+            args["enable-linp-up"] = None
+            args["linp-init"] = self.init_fn
+        else:
+            raise NotImplementedError
+
 
 class ProcLogWrapper:
     def __init__(self, proc, logfile, name):
@@ -229,8 +296,6 @@ def execute_queue(queue, dataset):
 
             print("\033c", end="")
 
-        # print("\033[{}F".format(lines_printed), end="")
-
 
 def launch_config(config, seed, dataset, test_run=False, dry_run=False):
 
@@ -291,11 +356,12 @@ def launch_config(config, seed, dataset, test_run=False, dry_run=False):
 
 if __name__ == "__main__":
 
-    queue = []
+    work_queue = []
 
     reps = 5
-    for in_size in [4,8,16,32,64,128]:
-        for i in range(reps):
-            queue.append(VanillaConfig("1-256-64-", in_size))
+    for in_size in [4, 8, 16, 32]:
+        for out_size in [4, 8, 16, 32, 64]:
+            for i in range(reps):
+                work_queue.append(LinConfig("1-256-64-", in_size, out_size, init_fn="normal"))
 
-    execute_queue(queue, "avazu")
+    execute_queue(work_queue, "criteo-kaggle")
