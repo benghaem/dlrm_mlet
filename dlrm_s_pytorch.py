@@ -58,6 +58,7 @@ import bisect
 import builtins
 import shutil
 import time
+import sys
 
 # data generation
 import dlrm_data_pytorch as dp
@@ -164,11 +165,17 @@ class DLRM_Net(nn.Module):
 
             LIN = nn.Linear(in_feat, out_feat, bias=False)
 
-            if (self.linp_init == "normal"):
-                nn.init.normal_(LIN.weight, mean=0.0, std=0.25)
-            elif (self.linp_init == "xavier"):
+            mode_args = self.linp_init.split("-")
+            mode = mode_args[0]
+
+            if (mode == "normal"):
+                stdev = 0.25
+                if len(mode_args) == 2:
+                    stdev = float(mode_args[1])
+                nn.init.normal_(LIN.weight, mean=0.0, std=stdev)
+            elif (mode == "xavier"):
                 nn.init.xavier_normal_(LIN.weight)
-            elif (self.linp_init =="rp"):
+            elif (mode =="rp"):
                 LIN.weight.data = torch.transpose(torch.tensor(self.rp_mats[i],
                         requires_grad=True), 0, 1)
 
@@ -197,7 +204,8 @@ class DLRM_Net(nn.Module):
         enable_linp_up = False,
         proj_down_dim = -1,
         proj_up_dim = -1,
-        linp_init = None
+        linp_init = None,
+        concat_og_feat = False
     ):
         super(DLRM_Net, self).__init__()
 
@@ -249,6 +257,7 @@ class DLRM_Net(nn.Module):
                 self.emb_linp_up = self.create_linp(self.proj_down_dim,
                                                     self.proj_up_dim,
                                                     ln_emb.size)
+            self.concat_og_feat = concat_og_feat
 
     def apply_mlp(self, x, layers):
         # approach 1: use ModuleList
@@ -371,6 +380,11 @@ class DLRM_Net(nn.Module):
         # interact features (dense and sparse)
         z = self.interact_features(x, ly_pro)
         # print(z.detach().cpu().numpy())
+
+        # concatenate features onto output
+        if (self.concat_og_feat):
+            #print(z.shape, dense_x.shape, [emb.shape for emb in ly_pro])
+            z = torch.cat((z, dense_x, *ly_pro), 1)
 
         # obtain probability of a click (using top mlp)
         p = self.apply_mlp(z, self.top_l)
@@ -544,11 +558,18 @@ if __name__ == "__main__":
     # gpu
     parser.add_argument("--use-gpu", action="store_true", default=False)
 
+    # dump_emb_init
+    parser.add_argument("--dump-emb-init", action="store_true", default=False)
+
     # random projection
     parser.add_argument("--enable-rp", action="store_true", default=False)
     parser.add_argument("--rp-file", type=str, default="")
     parser.add_argument("--enable-rp-up", action="store_true", default=False)
     parser.add_argument("--rpup-file", type=str, default="")
+
+    # concat_og_output
+    parser.add_argument("--concat-og-features", action="store_true",
+            default=False)
 
     # linear projection
     parser.add_argument("--enable-linp", action="store_true", default=False)
@@ -678,8 +699,8 @@ if __name__ == "__main__":
                 args.avazu_db_path,
                 split = 'train',
                 dup_to_mem = False,
-                # chunk_size=3000000
-                chunk_size=300000
+                #chunk_size=3000000
+                chunk_size=1000000
             )
             test_data = dp_ava.AvazuDataset(
                 args.avazu_db_path,
@@ -785,7 +806,12 @@ if __name__ == "__main__":
             + args.arch_interaction_op
             + " is not supported"
         )
-    arch_mlp_top_adjusted = str(num_int) + "-" + args.arch_mlp_top
+
+    first_top_dim = num_int
+    if args.concat_og_features:
+        first_top_dim = (num_int + (ln_emb.size) * m_den_out + ln_bot[0])
+
+    arch_mlp_top_adjusted = str(first_top_dim) + "-" + args.arch_mlp_top
     ln_top = np.fromstring(arch_mlp_top_adjusted, dtype=int, sep="-")
     # sanity check: feature sizes and mlp dimensions must match
     if m_den != ln_bot[0]:
@@ -807,7 +833,7 @@ if __name__ == "__main__":
             + str(m_den_out)
         )
 
-    if num_int != ln_top[0]:
+    if num_int != ln_top[0] and not args.concat_og_features:
         sys.exit(
             "ERROR: # of feature interactions "
             + str(num_int)
@@ -890,7 +916,8 @@ if __name__ == "__main__":
         enable_linp_up=args.enable_linp_up,
         proj_down_dim=args.proj_down_dim,
         proj_up_dim=args.proj_up_dim,
-        linp_init=args.linp_init
+        linp_init=args.linp_init,
+        concat_og_feat=args.concat_og_features,
     )
     # test prints
     if args.debug_mode:
@@ -917,6 +944,14 @@ if __name__ == "__main__":
         loss_fn = torch.nn.BCELoss(reduction="mean")
     else:
         sys.exit("ERROR: --loss-function=" + args.loss_function + " is not supported")
+
+    if args.dump_emb_init:
+        with open("/tmp/dlrm_emb_table_dump.emb", "wb+") as f:
+            pickle.dump(dlrm.emb_l, f)
+        if args.enable_linp:
+            with open("/tmp/dlrm_emb_mat_dump.emb", "wb+") as f:
+                pickle.dump(dlrm.emb_linp, f)
+        sys.exit()
 
     if not args.inference_only:
         # specify the optimizer algorithm

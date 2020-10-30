@@ -30,6 +30,7 @@ generic_args = {
     "test-freq": 30000,
     "nepochs": 1,
     "use-gpu": None,
+    #"dump-emb-init": None, #dump the newly intialized table
 }
 
 avazu_args = {"data-set": "avazu", "avazu-db-path": dlrm_support_dir + "/data/avazu.db"}
@@ -146,6 +147,45 @@ class VanillaConfig:
         return args
 
 
+class ConcatOGConfig:
+    def __init__(self, mlp_bot_partial, size):
+        self.mlp_bot_partial = mlp_bot_partial
+        self.size = size
+
+    def get_name(self):
+        return "dlrm_concat_og_{}".format(self.size)
+
+    def extra_args(self):
+        args = {}
+        args["arch-mlp-bot"] = self.mlp_bot_partial + str(self.size)
+        args["arch-sparse-feature-size"] = self.size
+        args["concat-og-features"] = None
+        return args
+
+
+class LinConcatOGConfig:
+    def __init__(self, mlp_bot_partial, size_in, size_out, init_fn):
+        self.mlp_bot_partial = mlp_bot_partial
+        self.sparse_feat_size_in = size_in
+        self.sparse_feat_size_out = size_out
+        self.init_fn = init_fn
+
+    def get_name(self):
+        return "dlrm_lin_cc_og_{}_{}_{}".format(
+            self.sparse_feat_size_in, self.sparse_feat_size_out, self.init_fn
+        )
+
+    def extra_args(self):
+        args = {}
+        args["arch-mlp-bot"] = self.mlp_bot_partial + str(self.sparse_feat_size_out)
+        args["arch-sparse-feature-size"] = self.sparse_feat_size_in
+        args["linp-init"] = self.init_fn
+        args["enable-linp"] = None
+        args["concat-og-features"] = None
+        return args
+
+
+
 class UpDownConfig:
     def __init__(
         self,
@@ -236,7 +276,8 @@ def execute_queue(queue, dataset):
 
     inactive_status_lines = []
     while len(queue) > 0:
-        plw = launch_config(queue.pop(), random.randint(0, 10000), dataset)
+        seed = random.randint(0,10000)
+        plw = launch_config(queue.pop(), seed, dataset)
         proc_wrappers.append(plw)
 
         active_count += 1
@@ -323,6 +364,7 @@ def launch_config(config, seed, dataset, test_run=False, dry_run=False):
         sys.exit(1)
 
     log = open(log_path, "w")
+    err = open(log_path+".err", "w")
 
     log.write("args:\n")
 
@@ -340,6 +382,7 @@ def launch_config(config, seed, dataset, test_run=False, dry_run=False):
         log.write("DRY RUN ARGS\n")
         log.write(str(args))
         log.close()
+        err.close()
 
         return None
 
@@ -347,9 +390,11 @@ def launch_config(config, seed, dataset, test_run=False, dry_run=False):
         proc = subprocess.Popen(
             dlrm_exe + args,
             stdout=log,
-            stderr=subprocess.STDOUT,
+            stderr=err,
             universal_newlines=True,
         )
+
+        err.close()
 
         return ProcLogWrapper(proc, log, config.get_name())
 
@@ -358,10 +403,27 @@ if __name__ == "__main__":
 
     work_queue = []
 
-    reps = 5
-    for in_size in [4, 8, 16, 32]:
-        for out_size in [4, 8, 16, 32, 64]:
-            for i in range(reps):
-                work_queue.append(LinConfig("1-256-64-", in_size, out_size, init_fn="normal"))
+    reps = 3
+    stdevs = [0.480383, 0.095016, 0.089492, 0.055964, 0.008288, 0.003648]
+    for i in range(reps):
+        for in_size in [32,16,8]:
+            for out_size in [32,16,8]:
+                if (in_size >= out_size):
+                    for stdev in stdevs:
+                        work_queue.append(
+                                LinConfig("1-256-64-",in_size,out_size,init_fn="normal-{}".format(stdev))
+                        )
 
-    execute_queue(work_queue, "criteo-kaggle")
+        #for out_size in [32,64,128]:
+        #    for in_size in [128]:
+        #        if out_size > in_size:
+        #            continue
+        #        work_queue.append(LinConfig("1-256-64-", in_size, out_size, init_fn="normal"))
+
+        #for out_size in [4,8,16,32,64,128]:
+        #    for in_size in [16]:
+        #        if out_size >= in_size:
+        #            continue
+        #        work_queue.append(LinConfig("1-256-64-", in_size, out_size, init_fn="normal"))
+
+    execute_queue(work_queue, "avazu")
