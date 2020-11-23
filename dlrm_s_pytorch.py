@@ -340,6 +340,16 @@ class DLRM_Net(nn.Module):
             Zflat = Z[:, li, lj]
             # concatenate dense features and interactions
             R = torch.cat([x] + [Zflat], dim=1)
+
+        elif self.arch_interaction_op == "dot-all":
+            (batch_size, d) = x.shape
+            T = torch.cat([x] + ly, dim=1).view((batch_size, -1, d))
+            # perform a dot product
+            Z = torch.bmm(T, torch.transpose(T, 1, 2))
+            # append dense feature with the interactions (into a row vector)
+            # approach 1: all
+            Zflat = Z.view((batch_size, -1))
+            R = torch.cat([x] + [Zflat], dim=1)
         elif self.arch_interaction_op == "cat":
             # concatenation features (into a row vector)
             R = torch.cat([x] + ly, dim=1)
@@ -378,13 +388,15 @@ class DLRM_Net(nn.Module):
                 ly_pro = self.apply_linp(ly_pro, self.emb_linp_up)
 
         # interact features (dense and sparse)
-        z = self.interact_features(x, ly_pro)
-        # print(z.detach().cpu().numpy())
-
-        # concatenate features onto output
-        if (self.concat_og_feat):
-            #print(z.shape, dense_x.shape, [emb.shape for emb in ly_pro])
-            z = torch.cat((z, dense_x, *ly_pro), 1)
+        if (self.interaction_op != "none"):
+            z = self.interact_features(x, ly_pro)
+            # concatenate features onto output
+            if (self.concat_og_feat):
+                #print(z.shape, dense_x.shape, [emb.shape for emb in ly_pro])
+                z = torch.cat((z, dense_x, *ly_pro), 1)
+        else:
+            # "deep" network only
+            z = torch.cat((dense_x, *ly_pro), 1)
 
         # obtain probability of a click (using top mlp)
         p = self.apply_mlp(z, self.top_l)
@@ -739,8 +751,6 @@ if __name__ == "__main__":
         )
 
 
-
-
         #setup batch sizes
         nbatches = args.num_batches if args.num_batches > 0 else len(train_loader)
         nbatches_test = len(test_loader)
@@ -790,6 +800,7 @@ if __name__ == "__main__":
     m_spa = args.arch_sparse_feature_size
     num_fea = ln_emb.size + 1  # num sparse + num dense features
     m_den_out = ln_bot[ln_bot.size - 1]
+
     if args.arch_interaction_op == "dot":
         # approach 1: all
         # num_int = num_fea * num_fea + m_den_out
@@ -798,8 +809,12 @@ if __name__ == "__main__":
             num_int = (num_fea * (num_fea + 1)) // 2 + m_den_out
         else:
             num_int = (num_fea * (num_fea - 1)) // 2 + m_den_out
+    elif args.arch_interaction_op == "dot-all":
+        num_int = num_fea * num_fea + m_den_out
     elif args.arch_interaction_op == "cat":
         num_int = num_fea * m_den_out
+    elif args.arch_interaction_op == "none":
+        num_int = 0
     else:
         sys.exit(
             "ERROR: --arch-interaction-op="
@@ -808,7 +823,7 @@ if __name__ == "__main__":
         )
 
     first_top_dim = num_int
-    if args.concat_og_features:
+    if (args.concat_og_features or args.arch_interaction_op == "none"):
         first_top_dim = (num_int + (ln_emb.size) * m_den_out + ln_bot[0])
 
     arch_mlp_top_adjusted = str(first_top_dim) + "-" + args.arch_mlp_top
