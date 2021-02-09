@@ -22,10 +22,6 @@ class AvazuDataset(data.Dataset):
 
         self.db_cursor = self.db_conn.cursor()
 
-        ##reduce memory usage by removing unneeded table from memory
-        if (dup_to_mem):
-            self.db_cursor.execute("""DROP TABLE data""")
-
         self.total_items = self.db_cursor.execute("""SELECT Count(*) FROM data_cleaned""").fetchone()[0]
 
         self.m_den = 1

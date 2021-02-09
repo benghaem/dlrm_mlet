@@ -13,27 +13,28 @@ import time
 dlrm_exe = ["python3", "-u", "dlrm_s_pytorch.py"]
 rpmb_exe = ["python3", "rpmb.py"]
 
-dlrm_support_dir = "/home/usr1/bghaem/mu/proj/dlrm/support"
-dlrm_output_dir = "/home/usr1/bghaem/mu/proj/dlrm/paper_rep"
-rp_mat_dir = "/home/usr1/bghaem/mu/proj/dlrm/paper_rep/rp_mats"
+dlrm_support_dir = "/home/ben/work/ut/rs/dlrm/support"
+dlrm_output_dir = "/home/ben/work/ut/rs/dlrm/results"
+rp_mat_dir = "/home/usr1/bghaem/mu/proj/dlrm/results/rp_mats"
 
 generic_args = {
     "arch-mlp-top": "512-256-1",
     "data-generation": "dataset",
     "loss-function": "bce",
     "round-targets": "True",
-    "learning-rate": 0.2,
-    "mini-batch-size": 128,
+    "learning-rate": 0.02,
+    "mini-batch-size": 256,
     "num-workers": 0,
     "print-freq": 5000,
     "print-time": None,
-    "test-freq": 30000,
+    "test-freq": 40000,
     "nepochs": 1,
-    "use-gpu": None,
+    "use-gpu": None
     # "dump-emb-init": None, #dump the newly intialized table
 }
 
-avazu_args = {"data-set": "avazu", "avazu-db-path": dlrm_support_dir + "/data/avazu.db"}
+avazu_args = {"data-set": "avazu", "avazu-db-path": dlrm_support_dir +
+"/data/avazu/avazu_slim.db"}
 
 criteo_kaggle_args = {
     "data-set": "kaggle",
@@ -155,6 +156,52 @@ class VanillaConfig:
             args[k] = v
         return args
 
+class WDLVanillaConfig:
+    def __init__(self, mlp_bot_partial, size, extra={}, extra_prefix=""):
+        self.mlp_bot_partial = mlp_bot_partial
+        self.size = size
+        self.extra = extra
+        self.extra_prefix = extra_prefix
+
+    def get_name(self):
+        return "wdl_vanilla{}_{}".format(self.extra_prefix, self.size)
+
+    def extra_args(self):
+        args = {}
+        args["arch-mlp-bot"] = self.mlp_bot_partial + str(self.size)
+        args["arch-sparse-feature-size"] = self.size
+        args["arch-interaction-op"] = "cat"
+        args["wide-feat-sel"] = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20"
+        for k,v in self.extra.items():
+            args[k] = v
+        return args
+
+class WDLLinConfig:
+    def __init__(self, mlp_bot_partial, size_in, size_out, init_fn, extra={},
+            extra_prefix=""):
+        self.mlp_bot_partial = mlp_bot_partial
+        self.sparse_feat_size_in = size_in
+        self.sparse_feat_size_out = size_out
+        self.init_fn = init_fn
+        self.extra_kwargs = extra
+        self.extra_prefix = extra_prefix
+
+    def get_name(self):
+        return "wdl_lin{}_{}_{}_{}".format(
+            self.extra_prefix, self.sparse_feat_size_in, self.sparse_feat_size_out, self.init_fn
+        )
+
+    def extra_args(self):
+        args = {}
+        args["arch-mlp-bot"] = self.mlp_bot_partial + str(self.sparse_feat_size_out)
+        args["arch-sparse-feature-size"] = self.sparse_feat_size_in
+        args["arch-interaction-op"] = "cat"
+        args["wide-feat-sel"] = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20"
+        args["linp-init"] = self.init_fn
+        args["enable-linp"] = None
+        for k, v in self.extra_kwargs.items():
+            args[k] = v
+        return args
 
 class ConcatOGConfig:
     def __init__(self, mlp_bot_partial, size):
@@ -262,31 +309,36 @@ class UpDownConfig:
 
 
 class ProcLogWrapper:
-    def __init__(self, proc, logfile, name):
+    def __init__(self, proc, name, config):
         self.proc = proc
-        self.log = logfile
         self.active = True
         self.ret = None
         self.name = name
+        self.config = config
 
     def poll(self):
         if self.active:
             self.ret = self.proc.poll()
             if self.ret is not None:
                 self.active = False
-                # cleanup file handle
-                self.log.close()
 
 
-def execute_queue(queue, dataset):
+def execute_queue(queue, dataset, retry=False):
+
+    if (retry):
+        print("Retry enabled")
 
     max_active = 1
     proc_wrappers = []
     active_count = 0
+    max_failure = 3
 
     start = datetime.datetime.now()
 
     inactive_status_lines = []
+    failed_status_lines = []
+
+    failure_counter = {}
     while len(queue) > 0:
         seed = random.randint(0, 10000)
         plw = launch_config(queue.pop(), seed, dataset)
@@ -306,12 +358,25 @@ def execute_queue(queue, dataset):
                     active_status_lines.append(plw.name)
                     active_count += 1
                 else:
-                    inactive_status_lines.append(plw.name)
+                    if plw.ret != 0 and retry:
+                        if plw.name not in failure_counter:
+                            failure_counter[plw.name] = 1
+                        else:
+                            failure_counter[plw.name] += 1
+
+                        if failure_counter[plw.name] < max_failure:
+                            #kick to back of queue
+                            queue.insert(0, plw.config)
+                        else:
+                            failed_status_lines.append(plw.name)
+                    else:
+                        inactive_status_lines.append(plw.name)
                     to_delete.append(plw)
 
             for plw in to_delete:
                 proc_wrappers.remove(plw)
 
+            print("\033c", end="")
             lines_printed = 0
             print(
                 "Status: Jobs in queue: {}, Total runtime: {}".format(
@@ -347,7 +412,12 @@ def execute_queue(queue, dataset):
                 print("\t...")
                 lines_printed += 1
 
-            print("\033c", end="")
+            print("---Failed---")
+            lines_printed += 1
+            for sl in failed_status_lines:
+                print("\t{}".format(sl))
+                lines_printed += 1
+
 
 
 def launch_config(config, seed, dataset, test_run=False, dry_run=False):
@@ -404,38 +474,41 @@ def launch_config(config, seed, dataset, test_run=False, dry_run=False):
         )
 
         err.close()
+        log.close()
 
-        return ProcLogWrapper(proc, log, config.get_name())
+        return ProcLogWrapper(proc, config.get_name(), config)
 
 
 if __name__ == "__main__":
 
     work_queue = []
 
-    reps = 3
+    reps = 1
     #stdevs = [0.480383, 0.095016, 0.089492, 0.055964, 0.008288, 0.003648]
+
     for i in range(reps):
-        for in_size in [32, 16, 8]:
+        for out_size in [4]:
+            #for in_size in [64]:
+            #    if out_size <= in_size:
+            #        work_queue.append(
+            #            WDLLinConfig(
+            #                "1-256-64-",
+            #                in_size,
+            #                out_size,
+            #                init_fn="normal-0.48",
+            #                extra={"optim":"adagrad"},
+            #                extra_prefix="-adagrad-highvar"
+            #            )
+            #        )
+
             work_queue.append(
-                VanillaConfig(
+                WDLVanillaConfig(
                     "1-256-64-",
-                    in_size,
-                    extra={"arch-interaction-op": "none"},
-                    extra_prefix="_deep_only"
+                    out_size,
+                    extra={"optim":"adagrad"},
+                    extra_prefix="-adagrad-zihao"
                 )
             )
-            for out_size in [32, 16, 8]:
-                if out_size <= in_size:
-                    work_queue.append(
-                        LinConfig(
-                            "1-256-64-",
-                            in_size,
-                            out_size,
-                            init_fn="normal",
-                            extra={"arch-interaction-op": "none"},
-                            extra_prefix="_deep_only"
-                        )
-                    )
 
         # for out_size in [32,64,128]:
         #    for in_size in [128]:
@@ -449,4 +522,19 @@ if __name__ == "__main__":
         #            continue
         #        work_queue.append(LinConfig("1-256-64-", in_size, out_size, init_fn="normal"))
 
-    execute_queue(work_queue, "avazu")
+
+    #print("Adding a zihao hp adagrad-wdl run")
+    #work_queue.append(
+    #    WDLVanillaConfig(
+    #        "1-256-64-",
+    #        8,
+    #        extra={"optim":"adagrad"},
+    #        extra_prefix="-adagrad-zihao"
+    #    )
+    #)
+
+    arg_retry = False
+    if len(sys.argv) == 2:
+        if sys.argv[1] == "retry":
+            arg_retry = True
+    execute_queue(work_queue, "avazu", retry=arg_retry)

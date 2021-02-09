@@ -74,7 +74,7 @@ import pickle
 # from apex import amp
 
 # onnx
-import onnx
+#import onnx
 
 # pytorch
 import torch
@@ -134,6 +134,24 @@ class DLRM_Net(nn.Module):
         # return layers
         # approach 2: use Sequential container to wrap all layers
         return torch.nn.Sequential(*layers)
+
+    def create_wide(self, ln, wide_feat_sel):
+        raw_layer_dict = {}
+        m = 1
+        for k in wide_feat_sel:
+            n = ln[k]
+
+            EE = nn.EmbeddingBag(n, m, mode="sum", sparse=True)
+            W = np.random.uniform(
+                low=-np.sqrt(1 / n), high=np.sqrt(1 / n), size=(n, m)
+            ).astype(np.float32)
+            EE.weight.data = torch.tensor(W, requires_grad=True)
+
+            raw_layer_dict[str(k)] = EE
+
+        wide_weights = nn.ModuleDict(raw_layer_dict)
+        return wide_weights
+
 
     def create_emb(self, m, ln):
         emb_l = nn.ModuleList()
@@ -205,7 +223,8 @@ class DLRM_Net(nn.Module):
         proj_down_dim = -1,
         proj_up_dim = -1,
         linp_init = None,
-        concat_og_feat = False
+        concat_og_feat = False,
+        wide_feat_sel = None
     ):
         super(DLRM_Net, self).__init__()
 
@@ -230,6 +249,10 @@ class DLRM_Net(nn.Module):
             self.emb_l = self.create_emb(m_spa, ln_emb)
             self.bot_l = self.create_mlp(ln_bot, sigmoid_bot)
             self.top_l = self.create_mlp(ln_top, sigmoid_top)
+
+            self.wide_feat_sel = wide_feat_sel
+            if (wide_feat_sel is not None):
+                self.wide_weights = self.create_wide(ln_emb, wide_feat_sel)
 
             self.enable_rp = enable_rp
             self.enable_rp_up = enable_rp_up
@@ -282,6 +305,28 @@ class DLRM_Net(nn.Module):
 
     #     for var_id, ly_o in enumerate(ly):
     #         ly_pro.append(act_fn(layers[var_id](ly_o)))
+
+    def apply_wide(self, lS_o, lS_i, wide_weights, wide_feat_sel):
+
+        accum_V = None
+
+        for k in wide_feat_sel:
+            sparse_index_group_batch = lS_i[k]
+            sparse_offset_group_batch = lS_o[k]
+
+            # wide weights is a dict
+            wide_weights_as_emb = wide_weights[str(k)]
+            V = wide_weights_as_emb(sparse_index_group_batch,
+                    sparse_offset_group_batch)
+
+            if accum_V is None:
+                accum_V = V
+            else:
+                accum_V = accum_V + V
+
+            # V is batches of embedding vectors (all length 1) that have been summed
+
+        return accum_V
 
     def apply_emb(self, lS_o, lS_i, emb_l):
         # WARNING: notice that we are processing the batch at once. We implicitly
@@ -388,7 +433,7 @@ class DLRM_Net(nn.Module):
                 ly_pro = self.apply_linp(ly_pro, self.emb_linp_up)
 
         # interact features (dense and sparse)
-        if (self.interaction_op != "none"):
+        if (self.arch_interaction_op != "none"):
             z = self.interact_features(x, ly_pro)
             # concatenate features onto output
             if (self.concat_og_feat):
@@ -398,8 +443,19 @@ class DLRM_Net(nn.Module):
             # "deep" network only
             z = torch.cat((dense_x, *ly_pro), 1)
 
+        if (self.wide_feat_sel is not None):
+            wide_p = self.apply_wide(lS_o, lS_i, self.wide_weights,
+                    self.wide_feat_sel)
+            #skip the last layer which should always be a sigmoid
+            assert type(self.top_l[-1]) == nn.Sigmoid
+            p = self.apply_mlp(z, self.top_l[:-1])
+
+            p = torch.sigmoid(wide_p+p)
+
+        else:
+            p = self.apply_mlp(z, self.top_l)
+
         # obtain probability of a click (using top mlp)
-        p = self.apply_mlp(z, self.top_l)
 
         # clamp output if needed
         if 0.0 < self.loss_threshold and self.loss_threshold < 1.0:
@@ -583,6 +639,9 @@ if __name__ == "__main__":
     parser.add_argument("--concat-og-features", action="store_true",
             default=False)
 
+    # wide features
+    parser.add_argument("--wide-feat-sel", type=str, default="")
+
     # linear projection
     parser.add_argument("--enable-linp", action="store_true", default=False)
     parser.add_argument("--enable-linp-up", action="store_true", default=False)
@@ -607,6 +666,9 @@ if __name__ == "__main__":
     # auc metric
     parser.add_argument("--auc-only",action="store_true", default=False)
     parser.add_argument("--enable-auc",action="store_true", default=True)
+
+    #optimizer
+    parser.add_argument("--optim",type=str, default="sgd")
 
     # debugging and profiling
     parser.add_argument("--print-freq", type=int, default=1)
@@ -664,8 +726,14 @@ if __name__ == "__main__":
     if (use_fp16 or args.apex_mode != "O0") and args.enable_rp_up:
         rpup_mats = rpup_mats.half()
 
+
+    wide_feat_sel = None
+    if args.wide_feat_sel != "":
+        wide_feat_sel = np.fromstring(args.wide_feat_sel, dtype=int, sep=",")
+
     ### prepare training data ###
-    ln_bot = np.fromstring(args.arch_mlp_bot, dtype=int, sep="-")
+    ln_bot = np.fromstring(args.arch_mlp_bot, dtype=int, sep="-") 
+
     # input data
     if args.data_generation == "dataset":
         # input and target from dataset
@@ -678,7 +746,7 @@ if __name__ == "__main__":
 
             sz0 = X_cat.shape[0]
             sz1 = X_cat.shape[1]
-            if use_gpu:
+            if use_gpu and args.num_workers == 0:
                 lS_i = [X_cat[:, i].pin_memory() for i in range(sz1)]
                 lS_o = [torch.tensor(range(sz0)).pin_memory() for _ in range(sz1)]
                 return X_int.pin_memory(), lS_o, lS_i, T.pin_memory()
@@ -710,14 +778,14 @@ if __name__ == "__main__":
             train_data = dp_ava.AvazuDataset(
                 args.avazu_db_path,
                 split = 'train',
-                dup_to_mem = False,
+                dup_to_mem = True,
                 #chunk_size=3000000
-                chunk_size=1000000
+                chunk_size=5000000
             )
             test_data = dp_ava.AvazuDataset(
                 args.avazu_db_path,
                 split = 'val',
-                dup_to_mem = False,
+                dup_to_mem = True,
                 chunk_size=5000000
                 #chunk_size=20000
             )
@@ -736,7 +804,7 @@ if __name__ == "__main__":
             shuffle=False,
             num_workers=args.num_workers,
             collate_fn=collate_wrapper,
-            pin_memory=False,
+            pin_memory=True,
             drop_last=False,
         )
 
@@ -746,7 +814,7 @@ if __name__ == "__main__":
             shuffle=False,
             num_workers=args.num_workers,
             collate_fn=collate_wrapper,
-            pin_memory=False,
+            pin_memory=True,
             drop_last=False,
         )
 
@@ -800,6 +868,10 @@ if __name__ == "__main__":
     m_spa = args.arch_sparse_feature_size
     num_fea = ln_emb.size + 1  # num sparse + num dense features
     m_den_out = ln_bot[ln_bot.size - 1]
+
+    if wide_feat_sel is not None:
+        for v in wide_feat_sel:
+            assert v < ln_emb.size
 
     if args.arch_interaction_op == "dot":
         # approach 1: all
@@ -933,6 +1005,7 @@ if __name__ == "__main__":
         proj_up_dim=args.proj_up_dim,
         linp_init=args.linp_init,
         concat_og_feat=args.concat_og_features,
+        wide_feat_sel=wide_feat_sel
     )
     # test prints
     if args.debug_mode:
@@ -970,7 +1043,13 @@ if __name__ == "__main__":
 
     if not args.inference_only:
         # specify the optimizer algorithm
-        optimizer = torch.optim.SGD(dlrm.parameters(), lr=args.learning_rate)
+        if args.optim == "sgd":
+            optimizer = torch.optim.SGD(dlrm.parameters(), lr=args.learning_rate)
+        elif args.optim == "adagrad":
+            optimizer = torch.optim.Adagrad(dlrm.parameters(),
+                    lr=args.learning_rate)
+        else:
+            sys.exit("ERROR: --optim=" + args.optim + " is not supported")
 
         #use apex
         if args.enable_amp:
