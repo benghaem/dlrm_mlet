@@ -10,15 +10,15 @@ dlrm_exe="python3 -u dlrm_s_pytorch.py"
 
 use_rclone=true
 
-dlrm_model_root=/home/usr1/bghaem/mu/proj/dlrm/models
-dlrm_support_dir=/home/usr1/bghaem/mu/proj/dlrm/support
+dlrm_model_root=/dlrm/models
+dlrm_support_dir=/dlrm/support
 
 echo "[INFO] Launch Pytorch"
 
 folder=$(date | sha1sum | head -c 6)
 echo "[INFO] $folder is the new log location"
 
-dlrm_log_dir="/home/usr1/bghaem/mu/proj/dlrm/avazu_redux_log/${folder}"
+dlrm_log_dir="/dlrm/avazu_redux_log/${folder}"
 dlrm_model_dir="${dlrm_model_root}/${folder}"
 mkdir -p $dlrm_log_dir
 mkdir -p $dlrm_model_dir
@@ -52,7 +52,7 @@ run_vanilla() {
               $generic_args 2>&1 | tee -a ${log_name}
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 
@@ -76,7 +76,7 @@ run_linp() {
               $generic_args 2>&1 | tee -a ${log_name}
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 
@@ -101,7 +101,7 @@ run_rp() {
               --rp-file ${4} 2>&1 | tee -a $log_name
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 

@@ -10,15 +10,15 @@ dlrm_exe="python3 -u dlrm_s_pytorch.py"
 
 use_rclone=false
 
-dlrm_model_root=/home/bcho/rp/models
-dlrm_support_dir=/home/bcho/rp/support
+dlrm_model_root=/models
+dlrm_support_dir=/support
 
 echo "[INFO] Launch Pytorch"
 
 folder=$(date | sha1sum | head -c 6)
 echo "[INFO] $folder is the new log location"
 
-dlrm_log_dir="/home/bcho/rp/avazu_redux_log/${folder}"
+dlrm_log_dir="/avazu_redux_log/${folder}"
 dlrm_model_dir="${dlrm_model_root}/${folder}"
 mkdir -p $dlrm_log_dir
 mkdir -p $dlrm_model_dir
@@ -56,7 +56,7 @@ run_vanilla() {
               $generic_args 2>&1 | tee -a ${log_name}
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 
@@ -80,7 +80,7 @@ run_linp() {
               $generic_args 2>&1 | tee -a ${log_name}
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 
@@ -107,7 +107,7 @@ run_linp_up2() {
               $generic_args 2>&1 | tee -a ${log_name}
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 run_linp_up() {
@@ -130,7 +130,7 @@ run_linp_up() {
               $generic_args 2>&1 | tee -a ${log_name}
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 
@@ -160,7 +160,7 @@ run_rp_down_linp_up() {
               $generic_args 2>&1 | tee -a ${log_name}
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 
@@ -190,7 +190,7 @@ run_rp_down_linp_up2() {
               $generic_args 2>&1 | tee -a ${log_name}
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 
@@ -215,7 +215,7 @@ run_rp() {
               --rp-file ${4} 2>&1 | tee -a $log_name
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 
@@ -240,7 +240,7 @@ run_rp_downup() {
               --rp-file ${4} 2>&1 | tee -a $log_name
     date | tee -a $log_name
     if [ "$use_rclone" = true ] ; then
-        rclone copy $log_name utdrive:emb/$folder
+        rclone copy $log_name drive:emb/$folder
     fi
 }
 

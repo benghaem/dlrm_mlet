@@ -13,9 +13,9 @@ import time
 dlrm_exe = ["python3", "-u", "dlrm_s_pytorch.py"]
 rpmb_exe = ["python3", "rpmb.py"]
 
-dlrm_support_dir = "/home/ben/work/ut/rs/dlrm/support"
-dlrm_output_dir = "/home/ben/work/ut/rs/dlrm/results"
-rp_mat_dir = "/home/usr1/bghaem/mu/proj/dlrm/results/rp_mats"
+dlrm_support_dir = "/dlrm/support"
+dlrm_output_dir = "/dlrm/results"
+rp_mat_dir = "/dlrm/results/rp_mats"
 
 generic_args = {
     "arch-mlp-top": "512-256-1",

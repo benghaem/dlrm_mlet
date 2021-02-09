@@ -1,16 +1,16 @@
 #!/bin/bash
 
-#SBATCH -J bg_rp                # Job name
-#SBATCH -o bg_rp.o%j            # Name of stdout output file
-#SBATCH -e bg_rp.e%j            # Name of stderr error file
+#SBATCH -J rp                # Job name
+#SBATCH -o rp.o%j            # Name of stdout output file
+#SBATCH -e rp.e%j            # Name of stderr error file
 #SBATCH -p p100                 # Queue (partition) name
 #SBATCH -N 1                    # Total # of nodes (must be 1 for serial)
 #SBATCH -n 1                    # Total # of mpi tasks (should be 1 for serial)
 #SBATCH -t 10:00:00             # Run time (hh:mm:ss)
-#SBATCH -A Accelerating-DNN-Tra # Project/Allocation
+#SBATCH -A  # Project/Allocation
 
 #SBATCH --mail-type=all
-#SBATCH --mail-user=ben.ghaem@utexas.edu
+#SBATCH --mail-user=
 
 #Let's assume jobs are in the 4hr range?
 #p100s have FP16 support

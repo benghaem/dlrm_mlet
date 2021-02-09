@@ -9,7 +9,7 @@ dlrm_exe="python3 -u dlrm_s_pytorch.py"
 
 use_rclone=false
 
-dlrm_support_dir=/home/usr1/bghaem/mu/proj/dlrm/support
+dlrm_support_dir=/dlrm/support
 
 echo "[INFO] Launch Pytorch"
 
